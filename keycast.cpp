@@ -1,10 +1,13 @@
-// cl keycast.cpp keylog.cpp user32.lib gdi32.lib shell32.lib
-
+// msbuild keycastow.vcxproj
+// msbuild keycastow.vcxproj /t:Clean
+//
 #include <windows.h>
 #include <stdio.h>
 
+#include "resource.h"
 #include "timer.h"
 CTimer showTimer;
+CTimer strokeTimer;
 
 struct KeyLabel{
     char text[32];
@@ -12,9 +15,14 @@ struct KeyLabel{
     HWND hwnd;
 };
 
-#define MAX_LABELS 5
-#define TIME_SLICE 1000
-KeyLabel keyLabels[MAX_LABELS];
+int onDisplayTimeout = 10;
+int keyStrokeTimeout = 1000;
+int labelCount = 5;
+int labelSpacing = 35;
+int labelFontSize = 46;
+COLORREF textColor = RGB(0,240, 33);
+
+KeyLabel keyLabels[10];
 
 #include "keycast.h"
 #include "keylog.h"
@@ -22,19 +30,16 @@ KeyLabel keyLabels[MAX_LABELS];
 char *szWinName = "KeyCast";
 HWND hMainWnd;
 HFONT hfFont;
-COLORREF textColor = RGB(0,240, 33);
 
 #define IDI_TRAY       100
 #define WM_TRAYMSG     101
 
 #define MENU_CONFIG    32
 #define MENU_EXIT      33
-
 void updateLabels(int lbl) {
     RECT box = {};
     int maxWidth = 0;
     HRGN hRgnLabel, hRegion = CreateRectRgn(0,0,0,0);
-    int spacing = 85;
     for(int i = 0; i < lbl; i ++) {
         // get text rect in selected font
         HDC hdc = GetDC(keyLabels[i].hwnd);
@@ -42,19 +47,18 @@ void updateLabels(int lbl) {
         DrawText(hdc, keyLabels[i].text, strlen(keyLabels[i].text), &box, DT_CALCRECT);
         ReleaseDC(NULL, hdc);
         // construct region for the labels
-        hRgnLabel = CreateRoundRectRgn (0, (box.bottom+4)*i+spacing*i, box.right+18, (box.bottom+4)*(i+1)+spacing*i, 15, 15);
+        hRgnLabel = CreateRoundRectRgn (0, (box.bottom+4)*i+labelSpacing*i, box.right+18, (box.bottom+4)*(i+1)+labelSpacing*i, 15, 15);
         CombineRgn(hRegion, hRegion, hRgnLabel, RGN_OR);
         DeleteObject(hRgnLabel);
         // show the text
         SendMessage(keyLabels[i].hwnd, WM_SETTEXT, NULL, (LPARAM)keyLabels[i].text);
         // set the label on its region
-        SetWindowPos(keyLabels[i].hwnd, 0, 0, (box.bottom+4)*i+spacing*i, box.right, box.bottom, SWP_NOZORDER);
-        SetLayeredWindowAttributes(keyLabels[i].hwnd, 0, (255 * keyLabels[i].time * 10) / 100, LWA_ALPHA);
+        SetWindowPos(keyLabels[i].hwnd, 0, 0, (box.bottom+4)*i+labelSpacing*i, box.right, box.bottom, SWP_NOZORDER);
         if(box.right+18 > maxWidth) {
             maxWidth = box.right+18;
         }
     }
-    SetWindowPos(hMainWnd, HWND_TOPMOST, 0, 0, maxWidth, (box.bottom+4+spacing)*lbl, SWP_NOMOVE);
+    SetWindowPos(hMainWnd, HWND_TOPMOST, 0, 0, maxWidth, (box.bottom+4+labelSpacing)*lbl, SWP_NOMOVE);
     SetWindowRgn(hMainWnd, hRegion, TRUE);
 
     InvalidateRect(hMainWnd, NULL, TRUE);
@@ -63,17 +67,17 @@ void updateLabels(int lbl) {
 }
 
 /*
- * return 0 ~ MAX_LABELS
+ * return 0 ~ labelCount
  */
 int bubbleOut() {
     int i, start = 0, end = -1;
-    for(i = 0; i < MAX_LABELS; i ++) {
+    for(i = 0; i < labelCount; i ++) {
         if(keyLabels[i].time > 0) {
             start = i;
             break;
         }
     }
-    for(i = MAX_LABELS - 1; i >= 0; i --) {
+    for(i = labelCount - 1; i >= 0; i --) {
         if(keyLabels[i].time > 0) {
             end = i;
             break;
@@ -91,36 +95,70 @@ int bubbleOut() {
 
 static void startFade() {
     int i = 0;
-    for(i = 0; i < MAX_LABELS; i++) {
+    bool toUpdate = false;
+    for(i = 0; i < labelCount; i++) {
         if(keyLabels[i].time > 0) {
             keyLabels[i].time--;
-            sprintf(keyLabels[i].text, "%s%d", keyLabels[i].text, keyLabels[i].time);
+            if(keyLabels[i].time == 0) {
+                toUpdate = true;
+            }
+            //sprintf(keyLabels[i].text, "%s%d", keyLabels[i].text, keyLabels[i].time);
         }
     }
 
-    int lbl = bubbleOut();
-    updateLabels(lbl);
+    if(toUpdate) {
+        int lbl = bubbleOut();
+        updateLabels(lbl);
+    }
+}
+
+static bool newStroke = true;
+static void startNewStroke() {
+    newStroke = true;
 }
 
 void showText(LPSTR text) {
     int lbl = bubbleOut();
-    if(lbl == MAX_LABELS) {
-        int i;
-        for (i = 1; i < MAX_LABELS; i++) {
-            strcpy(keyLabels[i-1].text, keyLabels[i].text);
-            keyLabels[i-1].time = keyLabels[i].time;
-            keyLabels[i].time = 0;
+    if(newStroke) {
+        if(lbl == labelCount) {
+            int i;
+            for (i = 1; i < labelCount; i++) {
+                strcpy(keyLabels[i-1].text, keyLabels[i].text);
+                keyLabels[i-1].time = keyLabels[i].time;
+                keyLabels[i].time = 0;
+            }
+            lbl = labelCount - 1;
         }
-        lbl = MAX_LABELS - 1;
+        strcpy(keyLabels[lbl].text, text);
+        keyLabels[lbl].time = onDisplayTimeout;
+        lbl++;
+        newStroke = false;
+        strokeTimer.Start(keyStrokeTimeout, false, true);
+    } else {
+        char tmp[32];
+        strcpy(tmp, keyLabels[lbl-1].text);
+        sprintf(keyLabels[lbl-1].text, "%s%s", tmp, text);
     }
-    strcpy(keyLabels[lbl].text, text);
-    keyLabels[lbl].time = 10;
-    lbl++;
-
     updateLabels(lbl);
+
 }
 
-
+BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    switch (msg)
+    {
+        case WM_COMMAND:
+            switch (LOWORD(wParam))
+            {
+                case IDOK:
+                    // Fall through.
+                case IDCANCEL:
+                    EndDialog(hwndDlg, wParam);
+                    return TRUE;
+            }
+    }
+    return FALSE;
+}
 LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     static POINT s_last_mouse;
@@ -173,7 +211,15 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
                 switch ( LOWORD( wParam ) )
                 {
                     case MENU_CONFIG:
-                        MessageBox( NULL, "keycast", nid.szTip, MB_SETFOREGROUND );
+                        if (DialogBox(NULL,
+                                    MAKEINTRESOURCE(IDD_DIALOG1),
+                                    hWnd,
+                                    (DLGPROC)SettingsWndProc)==IDOK) {
+                            // Complete the command; szItemName contains the
+                            // name of the item to delete.
+                        } else {
+                            // Cancel the command.
+                        }
                         break;
 
                     case MENU_EXIT:
@@ -237,7 +283,7 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     wcl.hIcon = LoadIcon(NULL, IDI_APPLICATION);            //Normal icon
     wcl.hIconSm = LoadIcon(NULL, IDI_WINLOGO);            //Windows logo
     wcl.hCursor = LoadCursor(NULL, IDC_ARROW);                //Normal cursor
-    wcl.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);        //Background color
+    wcl.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH);        //Background color
     wcl.lpszMenuName = NULL;                    //No menu
     wcl.cbWndExtra = 0;                //No extra--------
     wcl.cbClsExtra = 0;                //information needed
@@ -250,7 +296,7 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     hMainWnd = CreateWindowEx(
             WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
             szWinName,                    //Name of window class
-            "Basic Windows Messages",            //Title of window - visible
+            szWinName,            //Title of window - visible
             WS_POPUP,        //Standard window style
             0, 0,            //X and Y position of window
             0, 0,            //Width and height of window
@@ -266,9 +312,9 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         return 0;
     }
 
-    hfFont = CreateFont(46, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+    hfFont = CreateFont(labelFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH, "");
-    for(int i = 0; i < MAX_LABELS; i ++) {
+    for(int i = 0; i < labelCount; i ++) {
         keyLabels[i].hwnd = CreateWindow("STATIC","",
                 WS_VISIBLE | WS_CHILD | SS_LEFT,
                 9, 0, 0, 0,
@@ -278,7 +324,8 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         SendMessage(keyLabels[i].hwnd, WM_SETFONT, (WPARAM)hfFont, NULL);
     }
     showTimer.OnTimedEvent = startFade;
-    showTimer.Start(TIME_SLICE);
+    showTimer.Start(1000);
+    strokeTimer.OnTimedEvent = startNewStroke;
 
     kbdhook = SetWindowsHookEx(WH_KEYBOARD_LL, LLKeyboardProc, hThisInst, NULL);
 
