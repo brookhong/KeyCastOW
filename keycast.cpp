@@ -8,18 +8,18 @@
 #include "timer.h"
 CTimer showTimer;
 CTimer strokeTimer;
-CTimer fadeTimer;
 
 struct KeyLabel{
+    int alpha;
     RECT rect;
     char text[32];
     unsigned int time;
 };
 
 int labelFontSize = 46;
-int keyStrokeDelay = 1000;
-int lingerTime = 10;
-int fadeDuration = 10;
+int keyStrokeDelay = 500;
+int lingerTime = 5;         // 5s by default
+int fadeDuration = 3;       // 3s by default
 int labelCount = 5;
 int labelSpacing = 35;
 COLORREF textColor = RGB(0,240, 33);
@@ -39,7 +39,7 @@ HFONT hfFont;
 
 #define MENU_CONFIG    32
 #define MENU_EXIT      33
-void DrawAlphaBlend (HDC hdcwnd, RECT rt)
+void DrawAlphaBlend (HDC hdcwnd, int i)
 {
     HDC hdc;               // handle of the DC we will create
     BLENDFUNCTION bf;      // structure for alpha blending
@@ -48,6 +48,7 @@ void DrawAlphaBlend (HDC hdcwnd, RECT rt)
     VOID *pvBits;          // pointer to DIB section
     ULONG   ulWindowWidth, ulWindowHeight;      // window width/height
     UINT32   x,y;          // stepping variables
+    RECT &rt = keyLabels[i].rect;
 
     // calculate window width/height
     ulWindowWidth = rt.right - rt.left;
@@ -57,6 +58,7 @@ void DrawAlphaBlend (HDC hdcwnd, RECT rt)
     if ((!ulWindowWidth) || (!ulWindowHeight))
         return;
 
+    TextOut(hdcwnd, 0, keyLabels[i].rect.top, keyLabels[i].text, strlen(keyLabels[i].text));
     // create a DC for our bitmap -- the source DC for AlphaBlend
     hdc = CreateCompatibleDC(hdcwnd);
 
@@ -86,7 +88,7 @@ void DrawAlphaBlend (HDC hdcwnd, RECT rt)
 
     bf.BlendOp = AC_SRC_OVER;
     bf.BlendFlags = 0;
-    bf.SourceConstantAlpha = 0x1f;  // half of 0xff = 50% transparency
+    bf.SourceConstantAlpha = keyLabels[i].alpha;  // half of 0xff = 50% transparency
     bf.AlphaFormat = 0;             // ignore source alpha channel
 
     GdiAlphaBlend(hdcwnd, rt.left, rt.top,
@@ -111,8 +113,6 @@ void updateLabels(int lbl) {
 
         CombineRgn(hRegion, hRegion, hRgnLabel, RGN_OR);
         DeleteObject(hRgnLabel);
-        // show the text
-        // set the label on its region
         if(box.right+18 > maxWidth) {
             maxWidth = box.right+18;
         }
@@ -130,8 +130,7 @@ void drawLabels(HDC hdc) {
     SetBkMode (hdc, TRANSPARENT);
     HFONT hFontOld = (HFONT)SelectObject(hdc, hfFont);
     for(int i = 0; i < visibleLabelCount; i ++) {
-        TextOut(hdc, 0, keyLabels[i].rect.top, keyLabels[i].text, strlen(keyLabels[i].text));
-        DrawAlphaBlend(hdc, keyLabels[i].rect);
+        DrawAlphaBlend(hdc, i);
     }
 }
 
@@ -156,7 +155,9 @@ int bubbleOut() {
         for (i = start; i <= end; i++) {
             strcpy(keyLabels[i-start].text, keyLabels[i].text);
             keyLabels[i-start].time = keyLabels[i].time;
+            keyLabels[i-start].alpha = keyLabels[i].alpha;
             keyLabels[i].time = 0;
+            keyLabels[i].alpha = 0;
         }
     }
     return (end - start + 1);
@@ -164,24 +165,20 @@ int bubbleOut() {
 
 static void startFade() {
     int i = 0;
-    bool toUpdate = false;
-    for(i = 0; i < labelCount; i++) {
-        if(keyLabels[i].time > 0) {
-            keyLabels[i].time--;
-            if(keyLabels[i].time == 0) {
-                toUpdate = true;
-            }
-            //sprintf(keyLabels[i].text, "%s%d", keyLabels[i].text, keyLabels[i].time);
-        }
-    }
-
-    if(toUpdate) {
+    if(keyLabels[0].time == 0) {
         int lbl = bubbleOut();
         updateLabels(lbl);
+    } else {
+        for(i = 0; i < labelCount; i++) {
+            if(keyLabels[i].time > fadeDuration*1000) {
+                keyLabels[i].time -= 100;
+            } else if(keyLabels[i].time > 0) {
+                keyLabels[i].time -= 100;
+                keyLabels[i].alpha += (int)(25.5/fadeDuration);
+                InvalidateRect(hMainWnd, &keyLabels[i].rect, TRUE);
+            }
+        }
     }
-}
-
-static void fadeOut() {
 }
 
 static bool newStroke = true;
@@ -202,7 +199,8 @@ void showText(LPSTR text) {
             lbl = labelCount - 1;
         }
         strcpy(keyLabels[lbl].text, text);
-        keyLabels[lbl].time = lingerTime;
+        keyLabels[lbl].time = (lingerTime+fadeDuration)*1000;
+        keyLabels[lbl].alpha = 0;
         lbl++;
         newStroke = false;
         strokeTimer.Start(keyStrokeDelay, false, true);
@@ -210,6 +208,8 @@ void showText(LPSTR text) {
         char tmp[32];
         strcpy(tmp, keyLabels[lbl-1].text);
         sprintf(keyLabels[lbl-1].text, "%s%s", tmp, text);
+        strokeTimer.Stop();
+        strokeTimer.Start(keyStrokeDelay, false, true);
     }
     updateLabels(lbl);
 
@@ -392,9 +392,8 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         keyLabels[i].rect.left = 0;
     }
     showTimer.OnTimedEvent = startFade;
-    showTimer.Start(1000);
+    showTimer.Start(100);
     strokeTimer.OnTimedEvent = startNewStroke;
-    fadeTimer.OnTimedEvent = fadeOut;
 
     kbdhook = SetWindowsHookEx(WH_KEYBOARD_LL, LLKeyboardProc, hThisInst, NULL);
 
