@@ -1,6 +1,6 @@
 // msbuild keycastow.vcxproj
 // msbuild keycastow.vcxproj /t:Clean
-//
+// cl keycast.cpp keylog.cpp keycastow.res user32.lib shell32.lib gdi32.lib
 #include <windows.h>
 #include <stdio.h>
 
@@ -8,21 +8,24 @@
 #include "timer.h"
 CTimer showTimer;
 CTimer strokeTimer;
+CTimer fadeTimer;
 
 struct KeyLabel{
+    RECT rect;
     char text[32];
     unsigned int time;
-    HWND hwnd;
 };
 
-int onDisplayTimeout = 10;
-int keyStrokeTimeout = 1000;
+int labelFontSize = 46;
+int keyStrokeDelay = 1000;
+int lingerTime = 10;
+int fadeDuration = 10;
 int labelCount = 5;
 int labelSpacing = 35;
-int labelFontSize = 46;
 COLORREF textColor = RGB(0,240, 33);
 
 KeyLabel keyLabels[10];
+int visibleLabelCount = 0;
 
 #include "keycast.h"
 #include "keylog.h"
@@ -36,34 +39,100 @@ HFONT hfFont;
 
 #define MENU_CONFIG    32
 #define MENU_EXIT      33
+void DrawAlphaBlend (HDC hdcwnd, RECT rt)
+{
+    HDC hdc;               // handle of the DC we will create
+    BLENDFUNCTION bf;      // structure for alpha blending
+    HBITMAP hbitmap;       // bitmap handle
+    BITMAPINFO bmi;        // bitmap header
+    VOID *pvBits;          // pointer to DIB section
+    ULONG   ulWindowWidth, ulWindowHeight;      // window width/height
+    UINT32   x,y;          // stepping variables
+
+    // calculate window width/height
+    ulWindowWidth = rt.right - rt.left;
+    ulWindowHeight = rt.bottom - rt.top;
+
+    // make sure we have at least some window size
+    if ((!ulWindowWidth) || (!ulWindowHeight))
+        return;
+
+    // create a DC for our bitmap -- the source DC for AlphaBlend
+    hdc = CreateCompatibleDC(hdcwnd);
+
+    // zero the memory for the bitmap info
+    ZeroMemory(&bmi, sizeof(BITMAPINFO));
+
+    // setup bitmap info
+    // set the bitmap width and height to 60% of the width and height of each of the three horizontal areas. Later on, the blending will occur in the center of each of the three areas.
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = ulWindowWidth;
+    bmi.bmiHeader.biHeight = ulWindowHeight;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;         // four 8-bit components
+    bmi.bmiHeader.biCompression = BI_RGB;
+    bmi.bmiHeader.biSizeImage = ulWindowWidth * ulWindowHeight * 4;
+
+    // create our DIB section and select the bitmap into the dc
+    hbitmap = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &pvBits, NULL, 0x0);
+    SelectObject(hdc, hbitmap);
+
+    // in top window area, constant alpha = 50%, but no source alpha
+    // the color format for each pixel is 0xaarrggbb
+    // set all pixels to blue and set source alpha to zero
+    for (y = 0; y < ulWindowHeight; y++)
+        for (x = 0; x < ulWindowWidth; x++)
+            ((UINT32 *)pvBits)[x + y * ulWindowWidth] = 0x000000ff;
+
+    bf.BlendOp = AC_SRC_OVER;
+    bf.BlendFlags = 0;
+    bf.SourceConstantAlpha = 0x1f;  // half of 0xff = 50% transparency
+    bf.AlphaFormat = 0;             // ignore source alpha channel
+
+    GdiAlphaBlend(hdcwnd, rt.left, rt.top,
+                ulWindowWidth, ulWindowHeight,
+                hdc, 0, 0, ulWindowWidth, ulWindowHeight, bf);
+}
 void updateLabels(int lbl) {
+    visibleLabelCount = lbl;
     RECT box = {};
     int maxWidth = 0;
     HRGN hRgnLabel, hRegion = CreateRectRgn(0,0,0,0);
+    HDC hdc = GetDC(hMainWnd);
+    HFONT hFontOld = (HFONT)SelectObject(hdc, hfFont);
     for(int i = 0; i < lbl; i ++) {
         // get text rect in selected font
-        HDC hdc = GetDC(keyLabels[i].hwnd);
-        HFONT hFontOld = (HFONT)SelectObject(hdc, hfFont);
         DrawText(hdc, keyLabels[i].text, strlen(keyLabels[i].text), &box, DT_CALCRECT);
-        ReleaseDC(NULL, hdc);
         // construct region for the labels
-        hRgnLabel = CreateRoundRectRgn (0, (box.bottom+4)*i+labelSpacing*i, box.right+18, (box.bottom+4)*(i+1)+labelSpacing*i, 15, 15);
+        keyLabels[i].rect.top = (box.bottom+4)*i+labelSpacing*i;
+        keyLabels[i].rect.right = box.right+18;
+        keyLabels[i].rect.bottom = (box.bottom+4)*(i+1)+labelSpacing*i;
+        hRgnLabel = CreateRoundRectRgn (keyLabels[i].rect.left, keyLabels[i].rect.top, keyLabels[i].rect.right, keyLabels[i].rect.bottom, 15, 15);
+
         CombineRgn(hRegion, hRegion, hRgnLabel, RGN_OR);
         DeleteObject(hRgnLabel);
         // show the text
-        SendMessage(keyLabels[i].hwnd, WM_SETTEXT, NULL, (LPARAM)keyLabels[i].text);
         // set the label on its region
-        SetWindowPos(keyLabels[i].hwnd, 0, 0, (box.bottom+4)*i+labelSpacing*i, box.right, box.bottom, SWP_NOZORDER);
         if(box.right+18 > maxWidth) {
             maxWidth = box.right+18;
         }
     }
+    ReleaseDC(NULL, hdc);
     SetWindowPos(hMainWnd, HWND_TOPMOST, 0, 0, maxWidth, (box.bottom+4+labelSpacing)*lbl, SWP_NOMOVE);
     SetWindowRgn(hMainWnd, hRegion, TRUE);
 
     InvalidateRect(hMainWnd, NULL, TRUE);
     UpdateWindow(hMainWnd);
     ShowWindow(hMainWnd, SW_SHOW);
+}
+void drawLabels(HDC hdc) {
+    SetTextColor(hdc, textColor);
+    SetBkMode (hdc, TRANSPARENT);
+    HFONT hFontOld = (HFONT)SelectObject(hdc, hfFont);
+    for(int i = 0; i < visibleLabelCount; i ++) {
+        TextOut(hdc, 0, keyLabels[i].rect.top, keyLabels[i].text, strlen(keyLabels[i].text));
+        DrawAlphaBlend(hdc, keyLabels[i].rect);
+    }
 }
 
 /*
@@ -112,6 +181,9 @@ static void startFade() {
     }
 }
 
+static void fadeOut() {
+}
+
 static bool newStroke = true;
 static void startNewStroke() {
     newStroke = true;
@@ -130,10 +202,10 @@ void showText(LPSTR text) {
             lbl = labelCount - 1;
         }
         strcpy(keyLabels[lbl].text, text);
-        keyLabels[lbl].time = onDisplayTimeout;
+        keyLabels[lbl].time = lingerTime;
         lbl++;
         newStroke = false;
-        strokeTimer.Start(keyStrokeTimeout, false, true);
+        strokeTimer.Start(keyStrokeDelay, false, true);
     } else {
         char tmp[32];
         strcpy(tmp, keyLabels[lbl-1].text);
@@ -165,8 +237,16 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
     static HMENU hPopMenu;
     static NOTIFYICONDATA nid;
 
+    PAINTSTRUCT ps;
+    HDC hdc;
+
     switch(message)
     {
+        case WM_PAINT:
+            hdc = BeginPaint(hWnd, &ps);
+            drawLabels(hdc);
+            EndPaint(hWnd, &ps);
+            break;
         case WM_CREATE:
             {
                 memset( &nid, 0, sizeof( nid ) );
@@ -257,13 +337,6 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
         case WM_DESTROY:
             PostQuitMessage(0);
             break;
-        case WM_CTLCOLORSTATIC:
-            {
-                HDC hdcStatic = (HDC) wParam;
-                SetTextColor(hdcStatic, textColor);
-                SetBkMode (hdcStatic, TRANSPARENT);
-                return (LRESULT)GetStockObject(NULL_BRUSH);
-            }
         default:
             return DefWindowProc(hWnd, message, wParam, lParam);
     }
@@ -283,7 +356,7 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     wcl.hIcon = LoadIcon(NULL, IDI_APPLICATION);            //Normal icon
     wcl.hIconSm = LoadIcon(NULL, IDI_WINLOGO);            //Windows logo
     wcl.hCursor = LoadCursor(NULL, IDC_ARROW);                //Normal cursor
-    wcl.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH);        //Background color
+    wcl.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);        //Background color
     wcl.lpszMenuName = NULL;                    //No menu
     wcl.cbWndExtra = 0;                //No extra--------
     wcl.cbClsExtra = 0;                //information needed
@@ -315,17 +388,13 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     hfFont = CreateFont(labelFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH, "");
     for(int i = 0; i < labelCount; i ++) {
-        keyLabels[i].hwnd = CreateWindow("STATIC","",
-                WS_VISIBLE | WS_CHILD | SS_LEFT,
-                9, 0, 0, 0,
-                hMainWnd, NULL, hThisInst, NULL);
         keyLabels[i].time = 0;
-
-        SendMessage(keyLabels[i].hwnd, WM_SETFONT, (WPARAM)hfFont, NULL);
+        keyLabels[i].rect.left = 0;
     }
     showTimer.OnTimedEvent = startFade;
     showTimer.Start(1000);
     strokeTimer.OnTimedEvent = startNewStroke;
+    fadeTimer.OnTimedEvent = fadeOut;
 
     kbdhook = SetWindowsHookEx(WH_KEYBOARD_LL, LLKeyboardProc, hThisInst, NULL);
 
