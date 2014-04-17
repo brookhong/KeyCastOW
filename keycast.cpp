@@ -11,7 +11,6 @@ CTimer strokeTimer;
 
 #define MAXCHARSINLINE 64
 struct KeyLabel{
-    int alpha;
     RECT rect;
     char text[MAXCHARSINLINE];
     unsigned int time;
@@ -19,14 +18,14 @@ struct KeyLabel{
 
 int labelFontSize = 46;
 int keyStrokeDelay = 500;
-int lingerTime = 5;         // 5s by default
-int fadeDuration = 3;       // 3s by default
+int lingerTime = 1;         // 5s by default
+int fadeDuration = 1;       // 3s by default
 int labelCount = 5;
 int labelSpacing = 35;
 COLORREF textColor = RGB(0,240, 33);
+COLORREF bgColor = RGB(0x7f,0,0x8f);
 
 KeyLabel keyLabels[10];
-int visibleLabelCount = 0;
 
 #include "keycast.h"
 #include "keylog.h"
@@ -34,6 +33,7 @@ int visibleLabelCount = 0;
 char *szWinName = "KeyCast";
 HWND hMainWnd;
 HFONT hfFont;
+HDC hdcBuffer;
 RECT desktopRect;
 
 #define IDI_TRAY       100
@@ -43,7 +43,6 @@ RECT desktopRect;
 #define MENU_EXIT      33
 void DrawAlphaBlend (HDC hdcwnd, int i)
 {
-    HDC hdc;               // handle of the DC we will create
     BLENDFUNCTION bf;      // structure for alpha blending
     HBITMAP hbitmap;       // bitmap handle
     BITMAPINFO bmi;        // bitmap header
@@ -61,8 +60,6 @@ void DrawAlphaBlend (HDC hdcwnd, int i)
         return;
 
     TextOut(hdcwnd, 0, keyLabels[i].rect.top, keyLabels[i].text, strlen(keyLabels[i].text));
-    // create a DC for our bitmap -- the source DC for AlphaBlend
-    hdc = CreateCompatibleDC(hdcwnd);
 
     // zero the memory for the bitmap info
     ZeroMemory(&bmi, sizeof(BITMAPINFO));
@@ -78,107 +75,52 @@ void DrawAlphaBlend (HDC hdcwnd, int i)
     bmi.bmiHeader.biSizeImage = ulWindowWidth * ulWindowHeight * 4;
 
     // create our DIB section and select the bitmap into the dc
-    hbitmap = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &pvBits, NULL, 0x0);
-    SelectObject(hdc, hbitmap);
+    hbitmap = CreateDIBSection(hdcBuffer, &bmi, DIB_RGB_COLORS, &pvBits, NULL, 0x0);
+    SelectObject(hdcBuffer, hbitmap);
 
     // in top window area, constant alpha = 50%, but no source alpha
     // the color format for each pixel is 0xaarrggbb
     // set all pixels to blue and set source alpha to zero
     for (y = 0; y < ulWindowHeight; y++)
         for (x = 0; x < ulWindowWidth; x++)
-            ((UINT32 *)pvBits)[x + y * ulWindowWidth] = 0x000000ff;
+            ((UINT32 *)pvBits)[x + y * ulWindowWidth] = 0xffffffff;
 
     bf.BlendOp = AC_SRC_OVER;
     bf.BlendFlags = 0;
-    bf.SourceConstantAlpha = keyLabels[i].alpha;  // half of 0xff = 50% transparency
+    int alpha = 255-(int)255*(keyLabels[i].time/fadeDuration/1000.0);
+    alpha = (alpha < 0) ? 0: alpha;
+    bf.SourceConstantAlpha = alpha;  // half of 0xff = 50% transparency
     bf.AlphaFormat = 0;             // ignore source alpha channel
+    //bf.AlphaFormat = AC_SRC_ALPHA;  // use source alpha
 
     GdiAlphaBlend(hdcwnd, rt.left, rt.top,
                 ulWindowWidth, ulWindowHeight,
-                hdc, 0, 0, ulWindowWidth, ulWindowHeight, bf);
+                hdcBuffer, 0, 0, ulWindowWidth, ulWindowHeight, bf);
+    DeleteObject(hbitmap);
 }
-void updateLabels(int lbl) {
-    visibleLabelCount = lbl;
+void updateLabel(int i) {
     RECT box = {};
-    int maxWidth = 0;
-    int maxHeight = 0;
-    HRGN hRgnLabel, hRegion = CreateRectRgn(0,0,0,0);
-    HDC hdc = GetDC(hMainWnd);
-    HFONT hFontOld = (HFONT)SelectObject(hdc, hfFont);
-    for(int i = 0; i < lbl; i ++) {
-        // get text rect in selected font
-        DrawText(hdc, keyLabels[i].text, strlen(keyLabels[i].text), &box, DT_CALCRECT);
-        // construct region for the labels
-        keyLabels[i].rect.top = (box.bottom+4)*i+labelSpacing*i;
-        keyLabels[i].rect.right = box.right+18;
-        keyLabels[i].rect.bottom = (box.bottom+4)*(i+1)+labelSpacing*i;
-        hRgnLabel = CreateRoundRectRgn (keyLabels[i].rect.left, keyLabels[i].rect.top, keyLabels[i].rect.right, keyLabels[i].rect.bottom, 15, 15);
-
-        CombineRgn(hRegion, hRegion, hRgnLabel, RGN_OR);
-        DeleteObject(hRgnLabel);
-        if(box.right+18 > maxWidth) {
-            maxWidth = box.right+18;
-        }
-    }
-    ReleaseDC(NULL, hdc);
-    maxHeight = (box.bottom+4+labelSpacing)*lbl;
-    SetWindowPos(hMainWnd, HWND_TOPMOST, desktopRect.right - maxWidth, desktopRect.bottom - maxHeight, maxWidth, maxHeight, 0);
-    SetWindowRgn(hMainWnd, hRegion, TRUE);
-
-    InvalidateRect(hMainWnd, NULL, TRUE);
+    DrawText(hdcBuffer, keyLabels[i].text, strlen(keyLabels[i].text), &box, DT_CALCRECT);
+    keyLabels[i].rect.right = box.right+18;
 }
 void drawLabels(HDC hdc) {
     SetTextColor(hdc, textColor);
-    SetBkMode (hdc, TRANSPARENT);
+    SetBkColor (hdc, bgColor);
+    //SetBkMode (hdc, TRANSPARENT);
     HFONT hFontOld = (HFONT)SelectObject(hdc, hfFont);
-    for(int i = 0; i < visibleLabelCount; i ++) {
+    for(int i = 0; i < labelCount; i ++) {
         DrawAlphaBlend(hdc, i);
     }
 }
 
-/*
- * return 0 ~ labelCount
- */
-int bubbleOut() {
-    int i, start = 0, end = -1;
-    for(i = 0; i < labelCount; i ++) {
-        if(keyLabels[i].time > 0) {
-            start = i;
-            break;
-        }
-    }
-    for(i = labelCount - 1; i >= 0; i --) {
-        if(keyLabels[i].time > 0) {
-            end = i;
-            break;
-        }
-    }
-    if(start > 0) {
-        for (i = start; i <= end; i++) {
-            strcpy(keyLabels[i-start].text, keyLabels[i].text);
-            keyLabels[i-start].time = keyLabels[i].time;
-            keyLabels[i-start].alpha = keyLabels[i].alpha;
-            keyLabels[i].time = 0;
-            keyLabels[i].alpha = 0;
-        }
-    }
-    return (end - start + 1);
-}
-
 static void startFade() {
     int i = 0;
-    if(keyLabels[0].time == 0) {
-        int lbl = bubbleOut();
-        updateLabels(lbl);
-    } else {
-        for(i = 0; i < labelCount; i++) {
-            if(keyLabels[i].time > fadeDuration*1000) {
-                keyLabels[i].time -= 100;
-            } else if(keyLabels[i].time > 0) {
-                keyLabels[i].time -= 100;
-                keyLabels[i].alpha += (int)(25.5/fadeDuration);
-                InvalidateRect(hMainWnd, &keyLabels[i].rect, TRUE);
-            }
+    for(i = 0; i < labelCount; i++) {
+        if(keyLabels[i].time > fadeDuration*1000) {
+            keyLabels[i].time -= 100;
+        } else if(keyLabels[i].time > 0) {
+            keyLabels[i].time -= 100;
+            InvalidateRect(hMainWnd, &keyLabels[i].rect, TRUE);
         }
     }
 }
@@ -189,32 +131,51 @@ static void startNewStroke() {
 }
 
 void showText(LPSTR text) {
-    int lbl = bubbleOut();
+    HRGN hRgnLabel;
+    HRGN hRegion = CreateRectRgn(0,0,0,0);
     if(newStroke) {
-        if(lbl == labelCount) {
-            int i;
-            for (i = 1; i < labelCount; i++) {
-                strcpy(keyLabels[i-1].text, keyLabels[i].text);
-                keyLabels[i-1].time = keyLabels[i].time;
-                keyLabels[i].time = 0;
+        int i;
+        for (i = 1; i < labelCount; i++) {
+            if(keyLabels[i].time > 0) {
+                break;
             }
-            lbl = labelCount - 1;
         }
-        strcpy(keyLabels[lbl].text, text);
-        keyLabels[lbl].time = (lingerTime+fadeDuration)*1000;
-        keyLabels[lbl].alpha = 0;
-        lbl++;
+        for (; i < labelCount; i++) {
+            strcpy(keyLabels[i-1].text, keyLabels[i].text);
+            keyLabels[i-1].time = keyLabels[i].time;
+            keyLabels[i-1].rect.right = keyLabels[i].rect.right;
+        }
+        strcpy(keyLabels[labelCount-1].text, text);
+        keyLabels[labelCount-1].time = (lingerTime+fadeDuration)*1000;
+        updateLabel(labelCount-1);
+
+        for(int i = 0; i < labelCount; i ++) {
+            hRgnLabel = CreateRoundRectRgn (keyLabels[i].rect.left, keyLabels[i].rect.top, keyLabels[i].rect.right, keyLabels[i].rect.bottom, 15, 15);
+            CombineRgn(hRegion, hRegion, hRgnLabel, RGN_OR);
+            DeleteObject(hRgnLabel);
+        }
+        SetWindowRgn(hMainWnd, hRegion, TRUE);
+        InvalidateRect(hMainWnd, NULL, TRUE);
+
         newStroke = false;
         strokeTimer.Start(keyStrokeDelay, false, true);
     } else {
         char tmp[MAXCHARSINLINE];
-        strcpy(tmp, keyLabels[lbl-1].text);
-        sprintf(keyLabels[lbl-1].text, "%s%s", tmp, text);
+        strcpy(tmp, keyLabels[labelCount-1].text);
+        keyLabels[labelCount-1].time = (lingerTime+fadeDuration)*1000;
+        sprintf(keyLabels[labelCount-1].text, "%s%s", tmp, text);
         strokeTimer.Stop();
         strokeTimer.Start(keyStrokeDelay, false, true);
-    }
-    updateLabels(lbl);
 
+        updateLabel(labelCount-1);
+        hRgnLabel = CreateRoundRectRgn (keyLabels[labelCount-1].rect.left, keyLabels[labelCount-1].rect.top, keyLabels[labelCount-1].rect.right, keyLabels[labelCount-1].rect.bottom, 15, 15);
+        hRegion = CreateRectRgn(0,0,0,0);
+        GetWindowRgn(hMainWnd, hRegion);
+        CombineRgn(hRegion, hRegion, hRgnLabel, RGN_OR);
+        DeleteObject(hRgnLabel);
+        SetWindowRgn(hMainWnd, hRegion, TRUE);
+        InvalidateRect(hMainWnd, &keyLabels[labelCount-1].rect, TRUE);
+    }
 }
 
 BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -358,7 +319,7 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     wcl.hIcon = LoadIcon(NULL, IDI_APPLICATION);            //Normal icon
     wcl.hIconSm = LoadIcon(NULL, IDI_WINLOGO);            //Windows logo
     wcl.hCursor = LoadCursor(NULL, IDC_ARROW);                //Normal cursor
-    wcl.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);        //Background color
+    wcl.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH);        //Background color
     wcl.lpszMenuName = NULL;                    //No menu
     wcl.cbWndExtra = 0;                //No extra--------
     wcl.cbClsExtra = 0;                //information needed
@@ -380,9 +341,8 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
             hThisInst,                    //Handle this instance of program
             NULL                            //No extra arguments
             );
-    SetLayeredWindowAttributes(hMainWnd, 0, (255 * 50) / 100, LWA_ALPHA);
-    UpdateWindow(hMainWnd);
-    ShowWindow(hMainWnd, SW_SHOW);
+    //SetLayeredWindowAttributes(hMainWnd, 0, (255 * 50) / 100, LWA_ALPHA);
+    SetLayeredWindowAttributes (hMainWnd, RGB(255,255,255), 0x1f, LWA_COLORKEY);
     GetWindowRect(GetDesktopWindow(), &desktopRect);
 
     if( !hMainWnd)    {
@@ -392,9 +352,26 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
 
     hfFont = CreateFont(labelFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH, "");
+    HDC hdc = GetDC(hMainWnd);
+    hdcBuffer = CreateCompatibleDC(hdc);
+    ReleaseDC(hMainWnd, hdc);
+    HFONT hFontOld = (HFONT)SelectObject(hdcBuffer, hfFont);
+    RECT box = {};
+    DrawText(hdcBuffer, "A", 1, &box, DT_CALCRECT);
+    int maxHeight = (box.bottom+4+labelSpacing)*labelCount;
+    int maxWidth = box.right*16+18;
+    SetWindowPos(hMainWnd, HWND_TOPMOST, desktopRect.right - maxWidth, desktopRect.bottom - maxHeight, maxWidth, maxHeight, 0);
+    UpdateWindow(hMainWnd);
+    HRGN hRegion = CreateRectRgn(0,0,0,0);
+    SetWindowRgn(hMainWnd, hRegion, TRUE);
+    ShowWindow(hMainWnd, SW_SHOW);
+
     for(int i = 0; i < labelCount; i ++) {
         keyLabels[i].time = 0;
         keyLabels[i].rect.left = 0;
+        keyLabels[i].rect.right = 0;
+        keyLabels[i].rect.top = (box.bottom+4)*i+labelSpacing*i;
+        keyLabels[i].rect.bottom = (box.bottom+4)*(i+1)+labelSpacing*i;
     }
     showTimer.OnTimedEvent = startFade;
     showTimer.Start(100);
