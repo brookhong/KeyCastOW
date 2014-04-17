@@ -9,10 +9,11 @@
 CTimer showTimer;
 CTimer strokeTimer;
 
+#define MAXCHARSINLINE 64
 struct KeyLabel{
     int alpha;
     RECT rect;
-    char text[32];
+    char text[MAXCHARSINLINE];
     unsigned int time;
 };
 
@@ -33,6 +34,7 @@ int visibleLabelCount = 0;
 char *szWinName = "KeyCast";
 HWND hMainWnd;
 HFONT hfFont;
+RECT desktopRect;
 
 #define IDI_TRAY       100
 #define WM_TRAYMSG     101
@@ -99,6 +101,7 @@ void updateLabels(int lbl) {
     visibleLabelCount = lbl;
     RECT box = {};
     int maxWidth = 0;
+    int maxHeight = 0;
     HRGN hRgnLabel, hRegion = CreateRectRgn(0,0,0,0);
     HDC hdc = GetDC(hMainWnd);
     HFONT hFontOld = (HFONT)SelectObject(hdc, hfFont);
@@ -118,12 +121,11 @@ void updateLabels(int lbl) {
         }
     }
     ReleaseDC(NULL, hdc);
-    SetWindowPos(hMainWnd, HWND_TOPMOST, 0, 0, maxWidth, (box.bottom+4+labelSpacing)*lbl, SWP_NOMOVE);
+    maxHeight = (box.bottom+4+labelSpacing)*lbl;
+    SetWindowPos(hMainWnd, HWND_TOPMOST, desktopRect.right - maxWidth, desktopRect.bottom - maxHeight, maxWidth, maxHeight, 0);
     SetWindowRgn(hMainWnd, hRegion, TRUE);
 
     InvalidateRect(hMainWnd, NULL, TRUE);
-    UpdateWindow(hMainWnd);
-    ShowWindow(hMainWnd, SW_SHOW);
 }
 void drawLabels(HDC hdc) {
     SetTextColor(hdc, textColor);
@@ -205,7 +207,7 @@ void showText(LPSTR text) {
         newStroke = false;
         strokeTimer.Start(keyStrokeDelay, false, true);
     } else {
-        char tmp[32];
+        char tmp[MAXCHARSINLINE];
         strcpy(tmp, keyLabels[lbl-1].text);
         sprintf(keyLabels[lbl-1].text, "%s%s", tmp, text);
         strokeTimer.Stop();
@@ -379,6 +381,9 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
             NULL                            //No extra arguments
             );
     SetLayeredWindowAttributes(hMainWnd, 0, (255 * 50) / 100, LWA_ALPHA);
+    UpdateWindow(hMainWnd);
+    ShowWindow(hMainWnd, SW_SHOW);
+    GetWindowRect(GetDesktopWindow(), &desktopRect);
 
     if( !hMainWnd)    {
         MessageBox(NULL, "Could not create window", "Error", MB_OK);
