@@ -18,8 +18,8 @@ struct KeyLabel{
 
 int labelFontSize = 46;
 int keyStrokeDelay = 500;
-int lingerTime = 1;         // 5s by default
-int fadeDuration = 1;       // 3s by default
+int lingerTime = 1000;         // 1s by default
+int fadeDuration = 1000;       // 1s by default
 int labelCount = 5;
 int labelSpacing = 35;
 COLORREF textColor = RGB(0,240, 33);
@@ -87,7 +87,7 @@ void DrawAlphaBlend (HDC hdcwnd, int i)
 
     bf.BlendOp = AC_SRC_OVER;
     bf.BlendFlags = 0;
-    int alpha = 255-(int)255*(keyLabels[i].time/fadeDuration/1000.0);
+    int alpha = 255-(int)(255.0*keyLabels[i].time/fadeDuration);
     alpha = (alpha < 0) ? 0: alpha;
     bf.SourceConstantAlpha = alpha;  // half of 0xff = 50% transparency
     bf.AlphaFormat = 0;             // ignore source alpha channel
@@ -116,7 +116,7 @@ void drawLabels(HDC hdc) {
 static void startFade() {
     int i = 0;
     for(i = 0; i < labelCount; i++) {
-        if(keyLabels[i].time > fadeDuration*1000) {
+        if(keyLabels[i].time > fadeDuration) {
             keyLabels[i].time -= 100;
         } else if(keyLabels[i].time > 0) {
             keyLabels[i].time -= 100;
@@ -146,7 +146,7 @@ void showText(LPSTR text) {
             keyLabels[i-1].rect.right = keyLabels[i].rect.right;
         }
         strcpy(keyLabels[labelCount-1].text, text);
-        keyLabels[labelCount-1].time = (lingerTime+fadeDuration)*1000;
+        keyLabels[labelCount-1].time = lingerTime+fadeDuration;
         updateLabel(labelCount-1);
 
         for(int i = 0; i < labelCount; i ++) {
@@ -162,7 +162,7 @@ void showText(LPSTR text) {
     } else {
         char tmp[MAXCHARSINLINE];
         strcpy(tmp, keyLabels[labelCount-1].text);
-        keyLabels[labelCount-1].time = (lingerTime+fadeDuration)*1000;
+        keyLabels[labelCount-1].time = lingerTime+fadeDuration;
         sprintf(keyLabels[labelCount-1].text, "%s%s", tmp, text);
         strokeTimer.Stop();
         strokeTimer.Start(keyStrokeDelay, false, true);
@@ -178,13 +178,85 @@ void showText(LPSTR text) {
     }
 }
 
+BOOL ColorDialog ( HWND hWnd, COLORREF &clr ) {
+    DWORD dwCustClrs[16] = {
+        RGB(0,0,0),
+        RGB(0,0,255),
+        RGB(0,255,0),
+        RGB(128,255,255),
+        RGB(255,0,0),
+        RGB(255,0,255),
+        RGB(255,255,0),
+        RGB(192,192,192),
+        RGB(127,127,127),
+        RGB(0,0,128),
+        RGB(0,128,0),
+        RGB(0,255,255),
+        RGB(128,0,0),
+        RGB(255,0,128),
+        RGB(128,128,64),
+        RGB(255,255,255)
+    };
+    CHOOSECOLOR dlgColor;
+    dlgColor.lStructSize = sizeof(CHOOSECOLOR);
+    dlgColor.hwndOwner = hWnd;
+    dlgColor.hInstance = NULL;
+    dlgColor.lpTemplateName = NULL;
+    dlgColor.rgbResult =  clr;
+    dlgColor.lpCustColors =  dwCustClrs;
+    dlgColor.Flags = CC_ANYCOLOR|CC_RGBINIT;
+    dlgColor.lCustData = 0;
+    dlgColor.lpfnHook = NULL;
+
+    return (ChooseColor(&dlgColor));
+}
 BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+    char tmp[256];
     switch (msg)
     {
+        case WM_INITDIALOG:
+            sprintf(tmp, "%d", keyStrokeDelay);
+            SetDlgItemText(hwndDlg, IDC_KEYSTROKEDELAY, tmp);
+            sprintf(tmp, "%d", lingerTime);
+            SetDlgItemText(hwndDlg, IDC_LINGERTIME, tmp);
+            sprintf(tmp, "%d", fadeDuration);
+            SetDlgItemText(hwndDlg, IDC_FADEDURATION, tmp);
+            sprintf(tmp, "%d", labelSpacing);
+            SetDlgItemText(hwndDlg, IDC_LABELSPACING, tmp);
+            return TRUE;
         case WM_COMMAND:
             switch (LOWORD(wParam))
             {
+                case IDC_TEXTFONT:
+                    {
+                        CHOOSEFONT cf ;
+                        LOGFONT logfont;
+                        cf.lStructSize    = sizeof (CHOOSEFONT) ;
+                        cf.hwndOwner      = hwndDlg ;
+                        cf.hDC            = NULL ;
+                        cf.lpLogFont      = &logfont ;
+                        cf.iPointSize     = 0 ;
+                        cf.Flags          = CF_INITTOLOGFONTSTRUCT | CF_SCREENFONTS | CF_EFFECTS ;
+                        cf.rgbColors      = 0 ;
+                        cf.lCustData      = 0 ;
+                        cf.lpfnHook       = NULL ;
+                        cf.lpTemplateName = NULL ;
+                        cf.hInstance      = NULL ;
+                        cf.lpszStyle      = NULL ;
+                        cf.nFontType      = 0 ;               // Returned from ChooseFont
+                        cf.nSizeMin       = 0 ;
+                        cf.nSizeMax       = 0 ;
+
+                        if(ChooseFont (&cf)) {
+                            hfFont = CreateFontIndirect(&logfont);
+                        }
+                    }
+                    return TRUE;
+                case IDC_TEXTCOLOR:
+                    return ColorDialog(hwndDlg, textColor);
+                case IDC_BGCOLOR:
+                    return ColorDialog(hwndDlg, bgColor);
                 case IDOK:
                     // Fall through.
                 case IDCANCEL:
@@ -229,7 +301,7 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
                 Shell_NotifyIcon( NIM_ADD, &nid );
 
                 hPopMenu = CreatePopupMenu();
-                AppendMenu( hPopMenu, MF_STRING, MENU_CONFIG,  "More..." );
+                AppendMenu( hPopMenu, MF_STRING, MENU_CONFIG,  "&Settings..." );
                 AppendMenu( hPopMenu, MF_STRING, MENU_EXIT,    "E&xit" );
             }
             break;
@@ -255,7 +327,7 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
                 {
                     case MENU_CONFIG:
                         if (DialogBox(NULL,
-                                    MAKEINTRESOURCE(IDD_DIALOG1),
+                                    MAKEINTRESOURCE(IDD_DLGSETTINGS),
                                     hWnd,
                                     (DLGPROC)SettingsWndProc)==IDOK) {
                             // Complete the command; szItemName contains the
