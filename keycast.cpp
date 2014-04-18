@@ -1,6 +1,6 @@
 // msbuild keycastow.vcxproj
 // msbuild keycastow.vcxproj /t:Clean
-// cl keycast.cpp keylog.cpp keycastow.res user32.lib shell32.lib gdi32.lib
+// rc keycastow.rc && cl keycast.cpp keylog.cpp keycastow.res user32.lib shell32.lib gdi32.lib Comdlg32.lib
 #include <windows.h>
 #include <stdio.h>
 
@@ -16,7 +16,6 @@ struct KeyLabel{
     unsigned int time;
 };
 
-int labelFontSize = 46;
 int keyStrokeDelay = 500;
 int lingerTime = 1000;         // 1s by default
 int fadeDuration = 1000;       // 1s by default
@@ -24,6 +23,7 @@ int labelCount = 5;
 int labelSpacing = 35;
 COLORREF textColor = RGB(0,240, 33);
 COLORREF bgColor = RGB(0x7f,0,0x8f);
+LOGFONT labelFont;
 
 KeyLabel keyLabels[10];
 
@@ -32,10 +32,9 @@ KeyLabel keyLabels[10];
 
 char *szWinName = "KeyCast";
 HWND hMainWnd;
-HFONT hfFont;
+HFONT hlabelFont;
+HINSTANCE hInstance;
 HDC hdcBuffer;
-RECT desktopRect;
-
 #define IDI_TRAY       100
 #define WM_TRAYMSG     101
 
@@ -107,7 +106,7 @@ void drawLabels(HDC hdc) {
     SetTextColor(hdc, textColor);
     SetBkColor (hdc, bgColor);
     //SetBkMode (hdc, TRANSPARENT);
-    HFONT hFontOld = (HFONT)SelectObject(hdc, hfFont);
+    HFONT hFontOld = (HFONT)SelectObject(hdc, hlabelFont);
     for(int i = 0; i < labelCount; i ++) {
         DrawAlphaBlend(hdc, i);
     }
@@ -208,8 +207,29 @@ BOOL ColorDialog ( HWND hWnd, COLORREF &clr ) {
     dlgColor.lCustData = 0;
     dlgColor.lpfnHook = NULL;
 
-    return (ChooseColor(&dlgColor));
+    if(ChooseColor(&dlgColor)) {
+        clr = dlgColor.rgbResult;
+    }
+    return TRUE;
 }
+
+void updateMainWindow() {
+    HFONT hFontOld = (HFONT)SelectObject(hdcBuffer, hlabelFont);
+    RECT box = {};
+    DrawText(hdcBuffer, "A", 1, &box, DT_CALCRECT);
+    int maxHeight = (box.bottom+4+labelSpacing)*labelCount;
+    int maxWidth = box.right*16+18;
+    RECT desktopRect;
+    SystemParametersInfo(SPI_GETWORKAREA,NULL,&desktopRect,NULL);
+    SetWindowPos(hMainWnd, HWND_TOPMOST, desktopRect.right - maxWidth, desktopRect.bottom - maxHeight, maxWidth, maxHeight, 0);
+    UpdateWindow(hMainWnd);
+
+    for(int i = 0; i < labelCount; i ++) {
+        keyLabels[i].rect.top = (box.bottom+4)*i+labelSpacing*i;
+        keyLabels[i].rect.bottom = (box.bottom+4)*(i+1)+labelSpacing*i;
+    }
+}
+
 BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     char tmp[256];
@@ -231,11 +251,10 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                 case IDC_TEXTFONT:
                     {
                         CHOOSEFONT cf ;
-                        LOGFONT logfont;
                         cf.lStructSize    = sizeof (CHOOSEFONT) ;
                         cf.hwndOwner      = hwndDlg ;
                         cf.hDC            = NULL ;
-                        cf.lpLogFont      = &logfont ;
+                        cf.lpLogFont      = &labelFont ;
                         cf.iPointSize     = 0 ;
                         cf.Flags          = CF_INITTOLOGFONTSTRUCT | CF_SCREENFONTS | CF_EFFECTS ;
                         cf.rgbColors      = 0 ;
@@ -249,7 +268,7 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                         cf.nSizeMax       = 0 ;
 
                         if(ChooseFont (&cf)) {
-                            hfFont = CreateFontIndirect(&logfont);
+                            hlabelFont = CreateFontIndirect(&labelFont);
                         }
                     }
                     return TRUE;
@@ -258,7 +277,16 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                 case IDC_BGCOLOR:
                     return ColorDialog(hwndDlg, bgColor);
                 case IDOK:
-                    // Fall through.
+                    GetDlgItemText(hwndDlg, IDC_KEYSTROKEDELAY, tmp, 256);
+                    keyStrokeDelay = atoi(tmp);
+                    GetDlgItemText(hwndDlg, IDC_LINGERTIME, tmp, 256);
+                    lingerTime = atoi(tmp);
+                    GetDlgItemText(hwndDlg, IDC_FADEDURATION, tmp, 256);
+                    fadeDuration = atoi(tmp);
+                    GetDlgItemText(hwndDlg, IDC_LABELSPACING, tmp, 256);
+                    labelSpacing = atoi(tmp);
+                    updateMainWindow();
+                    InvalidateRect(hMainWnd, NULL, TRUE);
                 case IDCANCEL:
                     EndDialog(hwndDlg, wParam);
                     return TRUE;
@@ -291,13 +319,8 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
                 nid.uID                 = IDI_TRAY;
                 nid.uFlags              = NIF_ICON | NIF_MESSAGE | NIF_TIP;
                 nid.uCallbackMessage    = WM_TRAYMSG;
-                TCHAR    szIconFile[512];
-                GetSystemDirectory( szIconFile, sizeof( szIconFile ) );
-                if ( szIconFile[ lstrlen( szIconFile ) - 1 ] != '\\' )
-                    lstrcat( szIconFile, _T("\\") );
-                lstrcat( szIconFile, _T("shell32.dll") );
-                ExtractIconEx( szIconFile, 18, NULL, &(nid.hIcon), 1 );
-                lstrcpy( nid.szTip, "Click on the tray icon\nto activate the menu." );
+                nid.hIcon = LoadIcon( hInstance, MAKEINTRESOURCE(IDI_ICON1));
+                lstrcpy( nid.szTip, "KeyCast On Windows by brook hong" );
                 Shell_NotifyIcon( NIM_ADD, &nid );
 
                 hPopMenu = CreatePopupMenu();
@@ -377,11 +400,14 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
     }
     return 0;
 }
+
 int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         LPSTR lpszArgs, int nWinMode)
 {
     WNDCLASSEX wcl;                //Window class structure
     MSG        msg;                //Message structure
+
+    hInstance = hThisInst;                    //Handle this instance of program
 
     wcl.cbSize = sizeof(WNDCLASSEX);            //Size of window class - helps identify it
     wcl.hInstance = hThisInst;                    //Handle this instance of program
@@ -415,36 +441,36 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
             );
     //SetLayeredWindowAttributes(hMainWnd, 0, (255 * 50) / 100, LWA_ALPHA);
     SetLayeredWindowAttributes (hMainWnd, RGB(255,255,255), 0x1f, LWA_COLORKEY);
-    GetWindowRect(GetDesktopWindow(), &desktopRect);
-
     if( !hMainWnd)    {
         MessageBox(NULL, "Could not create window", "Error", MB_OK);
         return 0;
     }
 
-    hfFont = CreateFont(labelFontSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-            OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH, "");
+    memset(&labelFont, 0, sizeof(labelFont));
+    labelFont.lfCharSet = DEFAULT_CHARSET;
+    labelFont.lfHeight = -36;
+    labelFont.lfPitchAndFamily = DEFAULT_PITCH;
+    labelFont.lfWeight  = FW_NORMAL;
+    labelFont.lfOutPrecision = OUT_DEFAULT_PRECIS;
+    labelFont.lfClipPrecision = CLIP_DEFAULT_PRECIS;
+    labelFont.lfQuality = ANTIALIASED_QUALITY;
+    strcpy(labelFont.lfFaceName, TEXT("Arial"));
+    hlabelFont = CreateFontIndirect(&labelFont);
+
     HDC hdc = GetDC(hMainWnd);
     hdcBuffer = CreateCompatibleDC(hdc);
     ReleaseDC(hMainWnd, hdc);
-    HFONT hFontOld = (HFONT)SelectObject(hdcBuffer, hfFont);
-    RECT box = {};
-    DrawText(hdcBuffer, "A", 1, &box, DT_CALCRECT);
-    int maxHeight = (box.bottom+4+labelSpacing)*labelCount;
-    int maxWidth = box.right*16+18;
-    SetWindowPos(hMainWnd, HWND_TOPMOST, desktopRect.right - maxWidth, desktopRect.bottom - maxHeight, maxWidth, maxHeight, 0);
-    UpdateWindow(hMainWnd);
-    HRGN hRegion = CreateRectRgn(0,0,0,0);
-    SetWindowRgn(hMainWnd, hRegion, TRUE);
-    ShowWindow(hMainWnd, SW_SHOW);
 
     for(int i = 0; i < labelCount; i ++) {
         keyLabels[i].time = 0;
         keyLabels[i].rect.left = 0;
         keyLabels[i].rect.right = 0;
-        keyLabels[i].rect.top = (box.bottom+4)*i+labelSpacing*i;
-        keyLabels[i].rect.bottom = (box.bottom+4)*(i+1)+labelSpacing*i;
     }
+    updateMainWindow();
+    HRGN hRegion = CreateRectRgn(0,0,0,0);
+    SetWindowRgn(hMainWnd, hRegion, TRUE);
+    ShowWindow(hMainWnd, SW_SHOW);
+
     showTimer.OnTimedEvent = startFade;
     showTimer.Start(100);
     strokeTimer.OnTimedEvent = startNewStroke;
