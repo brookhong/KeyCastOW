@@ -1,3 +1,6 @@
+// Copyright © 2014 Brook Hong. All Rights Reserved.
+//
+
 #ifndef KEYLOG_H_INCLUDED
 #define KEYLOG_H_INCLUDED
 

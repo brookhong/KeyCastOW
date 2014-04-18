@@ -1,3 +1,6 @@
+// Copyright © 2014 Brook Hong. All Rights Reserved.
+//
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <Windows.h>
@@ -9,12 +12,6 @@ struct Key {
     const char *label;
 };
 struct Key specialKeys[] = {
-    {0x01, "<LBUTTON>"},
-    {0x02, "<RBUTTON>"},
-    {0x03, "<CANCEL>"},
-    {0x04, "<MBUTTON>"},
-    {0x05, "<XBUTTON1>"},
-    {0x06, "<XBUTTON2>"},
     {0x08, "<BACK>"},
     {0x09, "<TAB>"},
     {0x0C, "<CLEAR>"},
@@ -25,11 +22,8 @@ struct Key specialKeys[] = {
     {0x13, "<PAUSE>"},
     {0x14, "<CAPITAL>"},
     {0x15, "<KANA>"},
-    {0x15, "<HANGUEL>"},
-    {0x15, "<HANGUL>"},
     {0x17, "<JUNJA>"},
     {0x18, "<FINAL>"},
-    {0x19, "<HANJA>"},
     {0x19, "<KANJI>"},
     {0x1B, "<ESCAPE>"},
     {0x1C, "<CONVERT>"},
@@ -56,16 +50,6 @@ struct Key specialKeys[] = {
     {0x5C, "<RWIN>"},
     {0x5D, "<APPS>"},
     {0x5F, "<SLEEP>"},
-    {0x60, "<NUMPAD0>"},
-    {0x61, "<NUMPAD1>"},
-    {0x62, "<NUMPAD2>"},
-    {0x63, "<NUMPAD3>"},
-    {0x64, "<NUMPAD4>"},
-    {0x65, "<NUMPAD5>"},
-    {0x66, "<NUMPAD6>"},
-    {0x67, "<NUMPAD7>"},
-    {0x68, "<NUMPAD8>"},
-    {0x69, "<NUMPAD9>"},
     {0x6A, "<MULTIPLY>"},
     {0x6B, "<ADD>"},
     {0x6C, "<SEPARATOR>"},
@@ -175,17 +159,21 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
         return CallNextHookEx(kbdhook, nCode, wp, lp);
 
     if(wp == WM_KEYDOWN) {
-        if (k.vkCode >= 65 && k.vkCode <= 90 || //between 65 and 90 is a letter key
-                k.vkCode >= 48 && k.vkCode <= 57 || //between 48 and 57 is a digit key
-                k.vkCode >= 96 && k.vkCode <= 105) //between 48 and 57 is a digit key
-        {
+        BOOL special = FALSE;
+        if(k.vkCode == 0x08 || k.vkCode == 0x09 || k.vkCode == 0x0D || k.vkCode == 0x1B || k.vkCode == 0x20) {
+            special = TRUE;
+        }
+        if(!special) {
             WORD a = GetSymbolFromVK(k.vkCode, k.scanCode);
             if(a > 0) {
                 c[0] = (char)a;
                 c[1] = '\0';
                 showText(c);
+            } else {
+                special = TRUE;
             }
-        } else {
+        }
+        if(special) {
             for (size_t i=0; i < nSpecialKeys; ++i) {
                 if(specialKeys[i].val == k.vkCode) {
                     showText(specialKeys[i].label, TRUE);

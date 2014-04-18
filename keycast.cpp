@@ -1,3 +1,6 @@
+// Copyright © 2014 Brook Hong. All Rights Reserved.
+//
+
 // msbuild keycastow.vcxproj
 // msbuild keycastow.vcxproj /t:Clean
 // rc keycastow.rc && cl keycast.cpp keylog.cpp keycastow.res user32.lib shell32.lib gdi32.lib Comdlg32.lib
@@ -404,23 +407,23 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
 int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         LPSTR lpszArgs, int nWinMode)
 {
-    WNDCLASSEX wcl;                //Window class structure
-    MSG        msg;                //Message structure
+    WNDCLASSEX wcl;
+    MSG        msg;
 
-    hInstance = hThisInst;                    //Handle this instance of program
+    hInstance = hThisInst;
 
-    wcl.cbSize = sizeof(WNDCLASSEX);            //Size of window class - helps identify it
-    wcl.hInstance = hThisInst;                    //Handle this instance of program
-    wcl.lpszClassName = szWinName;            //Name of window class
-    wcl.lpfnWndProc = WindowFunc;                //Address of window function
-    wcl.style = CS_DBLCLKS;                        //Allow double clicks
-    wcl.hIcon = LoadIcon(NULL, IDI_APPLICATION);            //Normal icon
-    wcl.hIconSm = LoadIcon(NULL, IDI_WINLOGO);            //Windows logo
-    wcl.hCursor = LoadCursor(NULL, IDC_ARROW);                //Normal cursor
-    wcl.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH);        //Background color
-    wcl.lpszMenuName = NULL;                    //No menu
-    wcl.cbWndExtra = 0;                //No extra--------
-    wcl.cbClsExtra = 0;                //information needed
+    wcl.cbSize = sizeof(WNDCLASSEX);
+    wcl.hInstance = hThisInst;
+    wcl.lpszClassName = szWinName;
+    wcl.lpfnWndProc = WindowFunc;
+    wcl.style = CS_DBLCLKS;
+    wcl.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+    wcl.hIconSm = LoadIcon(NULL, IDI_WINLOGO);
+    wcl.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wcl.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH);
+    wcl.lpszMenuName = NULL;
+    wcl.cbWndExtra = 0;
+    wcl.cbClsExtra = 0;
 
     if(!RegisterClassEx(&wcl) )    {
         MessageBox(NULL, "Could not register window class", "Error", MB_OK);
@@ -429,15 +432,15 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
 
     hMainWnd = CreateWindowEx(
             WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
-            szWinName,                    //Name of window class
-            szWinName,            //Title of window - visible
-            WS_POPUP,        //Standard window style
+            szWinName,
+            szWinName,
+            WS_POPUP,
             0, 0,            //X and Y position of window
             0, 0,            //Width and height of window
-            NULL,                //Handle to parent window
-            NULL,                            //No override window
-            hThisInst,                    //Handle this instance of program
-            NULL                            //No extra arguments
+            NULL,
+            NULL,
+            hThisInst,
+            NULL
             );
     //SetLayeredWindowAttributes(hMainWnd, 0, (255 * 50) / 100, LWA_ALPHA);
     SetLayeredWindowAttributes (hMainWnd, RGB(255,255,255), 0x1f, LWA_COLORKEY);
@@ -477,11 +480,9 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
 
     kbdhook = SetWindowsHookEx(WH_KEYBOARD_LL, LLKeyboardProc, hThisInst, NULL);
 
-    //Establish message loop
-
     while( GetMessage(&msg, NULL, 0, 0) )    {
-        TranslateMessage(&msg);            //Translates some windows messages
-        DispatchMessage(&msg);            //Calls window function
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
     }
 
     return msg.wParam;
