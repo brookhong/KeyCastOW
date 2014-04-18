@@ -129,10 +129,10 @@ static void startNewStroke() {
     newStroke = true;
 }
 
-void showText(LPSTR text) {
+void showText(const char *text, BOOL forceNewStroke = FALSE) {
     HRGN hRgnLabel;
     HRGN hRegion = CreateRectRgn(0,0,0,0);
-    if(newStroke) {
+    if(newStroke || forceNewStroke || strlen(keyLabels[labelCount-1].text) > MAXCHARSINLINE/2) {
         int i;
         for (i = 1; i < labelCount; i++) {
             if(keyLabels[i].time > 0) {
