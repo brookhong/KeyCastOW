@@ -4,7 +4,9 @@
 // msbuild keycastow.vcxproj
 // msbuild keycastow.vcxproj /t:Clean
 // rc keycastow.rc && cl keycast.cpp keylog.cpp keycastow.res user32.lib shell32.lib gdi32.lib Comdlg32.lib
+
 #include <windows.h>
+#include <Commctrl.h>
 #include <stdio.h>
 
 #include "resource.h"
@@ -15,15 +17,15 @@ CTimer strokeTimer;
 #define MAXCHARSINLINE 64
 struct KeyLabel{
     RECT rect;
-    char text[MAXCHARSINLINE];
+    WCHAR text[MAXCHARSINLINE];
     unsigned int time;
 };
 
-int keyStrokeDelay = 500;
-int lingerTime = 1000;         // 1s by default
-int fadeDuration = 1000;       // 1s by default
-int labelCount = 5;
-int labelSpacing = 35;
+unsigned int keyStrokeDelay = 500;
+unsigned int lingerTime = 1000;         // 1s by default
+unsigned int fadeDuration = 1000;       // 1s by default
+unsigned int labelCount = 5;
+unsigned int labelSpacing = 35;
 COLORREF textColor = RGB(0,240, 33);
 COLORREF bgColor = RGB(0x7f,0,0x8f);
 LOGFONT labelFont;
@@ -33,7 +35,7 @@ KeyLabel keyLabels[10];
 #include "keycast.h"
 #include "keylog.h"
 
-char *szWinName = "KeyCast";
+WCHAR *szWinName = L"KeyCast";
 HWND hMainWnd;
 HFONT hlabelFont;
 HINSTANCE hInstance;
@@ -61,7 +63,7 @@ void DrawAlphaBlend (HDC hdcwnd, int i)
     if ((!ulWindowWidth) || (!ulWindowHeight))
         return;
 
-    TextOut(hdcwnd, 0, keyLabels[i].rect.top, keyLabels[i].text, strlen(keyLabels[i].text));
+    TextOut(hdcwnd, 0, keyLabels[i].rect.top, keyLabels[i].text, wcslen(keyLabels[i].text));
 
     // zero the memory for the bitmap info
     ZeroMemory(&bmi, sizeof(BITMAPINFO));
@@ -102,7 +104,7 @@ void DrawAlphaBlend (HDC hdcwnd, int i)
 }
 void updateLabel(int i) {
     RECT box = {};
-    DrawText(hdcBuffer, keyLabels[i].text, strlen(keyLabels[i].text), &box, DT_CALCRECT);
+    DrawText(hdcBuffer, keyLabels[i].text, wcslen(keyLabels[i].text), &box, DT_CALCRECT);
     keyLabels[i].rect.right = box.right+18;
 }
 void drawLabels(HDC hdc) {
@@ -110,13 +112,13 @@ void drawLabels(HDC hdc) {
     SetBkColor (hdc, bgColor);
     //SetBkMode (hdc, TRANSPARENT);
     HFONT hFontOld = (HFONT)SelectObject(hdc, hlabelFont);
-    for(int i = 0; i < labelCount; i ++) {
+    for(unsigned int i = 0; i < labelCount; i ++) {
         DrawAlphaBlend(hdc, i);
     }
 }
 
 static void startFade() {
-    int i = 0;
+    unsigned int i = 0;
     for(i = 0; i < labelCount; i++) {
         if(keyLabels[i].time > fadeDuration) {
             keyLabels[i].time -= 100;
@@ -132,26 +134,26 @@ static void startNewStroke() {
     newStroke = true;
 }
 
-void showText(const char *text, BOOL forceNewStroke = FALSE) {
+void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
     HRGN hRgnLabel;
     HRGN hRegion = CreateRectRgn(0,0,0,0);
-    if(newStroke || forceNewStroke || strlen(keyLabels[labelCount-1].text) > MAXCHARSINLINE/2) {
-        int i;
+    if(newStroke || forceNewStroke || wcslen(keyLabels[labelCount-1].text) > MAXCHARSINLINE/2) {
+        unsigned int i;
         for (i = 1; i < labelCount; i++) {
             if(keyLabels[i].time > 0) {
                 break;
             }
         }
         for (; i < labelCount; i++) {
-            strcpy(keyLabels[i-1].text, keyLabels[i].text);
+            wcscpy_s(keyLabels[i-1].text, MAXCHARSINLINE, keyLabels[i].text);
             keyLabels[i-1].time = keyLabels[i].time;
             keyLabels[i-1].rect.right = keyLabels[i].rect.right;
         }
-        strcpy(keyLabels[labelCount-1].text, text);
+        wcscpy_s(keyLabels[labelCount-1].text, MAXCHARSINLINE, text);
         keyLabels[labelCount-1].time = lingerTime+fadeDuration;
         updateLabel(labelCount-1);
 
-        for(int i = 0; i < labelCount; i ++) {
+        for(i = 0; i < labelCount; i ++) {
             hRgnLabel = CreateRoundRectRgn (keyLabels[i].rect.left, keyLabels[i].rect.top, keyLabels[i].rect.right, keyLabels[i].rect.bottom, 15, 15);
             CombineRgn(hRegion, hRegion, hRgnLabel, RGN_OR);
             DeleteObject(hRgnLabel);
@@ -162,10 +164,10 @@ void showText(const char *text, BOOL forceNewStroke = FALSE) {
         newStroke = false;
         strokeTimer.Start(keyStrokeDelay, false, true);
     } else {
-        char tmp[MAXCHARSINLINE];
-        strcpy(tmp, keyLabels[labelCount-1].text);
+        WCHAR tmp[MAXCHARSINLINE];
+        wcscpy_s(tmp, MAXCHARSINLINE, keyLabels[labelCount-1].text);
         keyLabels[labelCount-1].time = lingerTime+fadeDuration;
-        sprintf(keyLabels[labelCount-1].text, "%s%s", tmp, text);
+        swprintf(keyLabels[labelCount-1].text, MAXCHARSINLINE, L"%s%s", tmp, text);
         strokeTimer.Stop();
         strokeTimer.Start(keyStrokeDelay, false, true);
 
@@ -219,7 +221,7 @@ BOOL ColorDialog ( HWND hWnd, COLORREF &clr ) {
 void updateMainWindow() {
     HFONT hFontOld = (HFONT)SelectObject(hdcBuffer, hlabelFont);
     RECT box = {};
-    DrawText(hdcBuffer, "A", 1, &box, DT_CALCRECT);
+    DrawText(hdcBuffer, L"A", 1, &box, DT_CALCRECT);
     int maxHeight = (box.bottom+4+labelSpacing)*labelCount;
     int maxWidth = box.right*16+18;
     RECT desktopRect;
@@ -227,7 +229,7 @@ void updateMainWindow() {
     SetWindowPos(hMainWnd, HWND_TOPMOST, desktopRect.right - maxWidth, desktopRect.bottom - maxHeight, maxWidth, maxHeight, 0);
     UpdateWindow(hMainWnd);
 
-    for(int i = 0; i < labelCount; i ++) {
+    for(unsigned int i = 0; i < labelCount; i ++) {
         keyLabels[i].rect.top = (box.bottom+4)*i+labelSpacing*i;
         keyLabels[i].rect.bottom = (box.bottom+4)*(i+1)+labelSpacing*i;
     }
@@ -235,19 +237,34 @@ void updateMainWindow() {
 
 BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-    char tmp[256];
+    WCHAR tmp[256];
     switch (msg)
     {
         case WM_INITDIALOG:
-            sprintf(tmp, "%d", keyStrokeDelay);
+            swprintf(tmp, 256, L"%d", keyStrokeDelay);
             SetDlgItemText(hwndDlg, IDC_KEYSTROKEDELAY, tmp);
-            sprintf(tmp, "%d", lingerTime);
+            swprintf(tmp, 256, L"%d", lingerTime);
             SetDlgItemText(hwndDlg, IDC_LINGERTIME, tmp);
-            sprintf(tmp, "%d", fadeDuration);
+            swprintf(tmp, 256, L"%d", fadeDuration);
             SetDlgItemText(hwndDlg, IDC_FADEDURATION, tmp);
-            sprintf(tmp, "%d", labelSpacing);
+            swprintf(tmp, 256, L"%d", labelSpacing);
             SetDlgItemText(hwndDlg, IDC_LABELSPACING, tmp);
             return TRUE;
+        case WM_NOTIFY:
+            switch (((LPNMHDR)lParam)->code)
+            {
+
+                case NM_CLICK:          // Fall through to the next case.
+                case NM_RETURN:
+                    {
+                        PNMLINK pNMLink = (PNMLINK)lParam;
+                        LITEM   item    = pNMLink->item;
+                        ShellExecute(NULL, L"open", item.szUrl, NULL, NULL, SW_SHOW);
+                        break;
+                    }
+            }
+
+            break;
         case WM_COMMAND:
             switch (LOWORD(wParam))
             {
@@ -281,13 +298,13 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     return ColorDialog(hwndDlg, bgColor);
                 case IDOK:
                     GetDlgItemText(hwndDlg, IDC_KEYSTROKEDELAY, tmp, 256);
-                    keyStrokeDelay = atoi(tmp);
+                    keyStrokeDelay = _wtoi(tmp);
                     GetDlgItemText(hwndDlg, IDC_LINGERTIME, tmp, 256);
-                    lingerTime = atoi(tmp);
+                    lingerTime = _wtoi(tmp);
                     GetDlgItemText(hwndDlg, IDC_FADEDURATION, tmp, 256);
-                    fadeDuration = atoi(tmp);
+                    fadeDuration = _wtoi(tmp);
                     GetDlgItemText(hwndDlg, IDC_LABELSPACING, tmp, 256);
-                    labelSpacing = atoi(tmp);
+                    labelSpacing = _wtoi(tmp);
                     updateMainWindow();
                     InvalidateRect(hMainWnd, NULL, TRUE);
                 case IDCANCEL:
@@ -323,12 +340,13 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
                 nid.uFlags              = NIF_ICON | NIF_MESSAGE | NIF_TIP;
                 nid.uCallbackMessage    = WM_TRAYMSG;
                 nid.hIcon = LoadIcon( hInstance, MAKEINTRESOURCE(IDI_ICON1));
-                lstrcpy( nid.szTip, "KeyCast On Windows by brook hong" );
+                lstrcpy( nid.szTip, L"KeyCast On Windows by brook hong" );
                 Shell_NotifyIcon( NIM_ADD, &nid );
 
                 hPopMenu = CreatePopupMenu();
-                AppendMenu( hPopMenu, MF_STRING, MENU_CONFIG,  "&Settings..." );
-                AppendMenu( hPopMenu, MF_STRING, MENU_EXIT,    "E&xit" );
+                AppendMenu( hPopMenu, MF_STRING, MENU_CONFIG,  L"&Settings..." );
+                AppendMenu( hPopMenu, MF_STRING, MENU_EXIT,    L"E&xit" );
+                SetMenuDefaultItem( hPopMenu, MENU_CONFIG, FALSE );
             }
             break;
         case WM_TRAYMSG:
@@ -426,9 +444,21 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     wcl.cbClsExtra = 0;
 
     if(!RegisterClassEx(&wcl) )    {
-        MessageBox(NULL, "Could not register window class", "Error", MB_OK);
+        MessageBox(NULL, L"Could not register window class", L"Error", MB_OK);
         return 0;
     }
+
+    //INITCOMMONCONTROLSEX ics;
+    //ZeroMemory(&ics, sizeof(ics));
+    //ics.dwSize = sizeof(ics);
+    //ics.dwICC = ICC_LINK_CLASS;
+    //InitCommonControlsEx(&ics);
+    INITCOMMONCONTROLSEX icex;
+    icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
+    icex.dwICC = ICC_LINK_CLASS|ICC_LISTVIEW_CLASSES|ICC_PAGESCROLLER_CLASS
+        |ICC_PROGRESS_CLASS|ICC_STANDARD_CLASSES|ICC_TAB_CLASSES|ICC_TREEVIEW_CLASSES
+        |ICC_UPDOWN_CLASS|ICC_USEREX_CLASSES|ICC_WIN95_CLASSES;
+    InitCommonControlsEx(&icex);
 
     hMainWnd = CreateWindowEx(
             WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
@@ -445,7 +475,7 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     //SetLayeredWindowAttributes(hMainWnd, 0, (255 * 50) / 100, LWA_ALPHA);
     SetLayeredWindowAttributes (hMainWnd, RGB(255,255,255), 0x1f, LWA_COLORKEY);
     if( !hMainWnd)    {
-        MessageBox(NULL, "Could not create window", "Error", MB_OK);
+        MessageBox(NULL, L"Could not create window", L"Error", MB_OK);
         return 0;
     }
 
@@ -457,14 +487,14 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     labelFont.lfOutPrecision = OUT_DEFAULT_PRECIS;
     labelFont.lfClipPrecision = CLIP_DEFAULT_PRECIS;
     labelFont.lfQuality = ANTIALIASED_QUALITY;
-    strcpy(labelFont.lfFaceName, TEXT("Arial"));
+    wcscpy_s(labelFont.lfFaceName, sizeof(labelFont.lfFaceName), TEXT("Arial"));
     hlabelFont = CreateFontIndirect(&labelFont);
 
     HDC hdc = GetDC(hMainWnd);
     hdcBuffer = CreateCompatibleDC(hdc);
     ReleaseDC(hMainWnd, hdc);
 
-    for(int i = 0; i < labelCount; i ++) {
+    for(unsigned int i = 0; i < labelCount; i ++) {
         keyLabels[i].time = 0;
         keyLabels[i].rect.left = 0;
         keyLabels[i].rect.right = 0;
