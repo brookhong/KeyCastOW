@@ -22,14 +22,14 @@ struct KeyLabel{
 };
 
 unsigned int keyStrokeDelay = 500;
-unsigned int lingerTime = 1000;         // 1s by default
-unsigned int fadeDuration = 1000;       // 1s by default
-unsigned int labelCount = 5;
-unsigned int labelSpacing = 35;
+unsigned int lingerTime = 1200;         // 1s by default
+unsigned int fadeDuration = 600;       // 1s by default
+unsigned int labelSpacing = 30;
 COLORREF textColor = RGB(0,240, 33);
 COLORREF bgColor = RGB(0x7f,0,0x8f);
 LOGFONT labelFont;
 
+unsigned int labelCount = 10;
 KeyLabel keyLabels[10];
 
 #include "keycast.h"
