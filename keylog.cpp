@@ -15,7 +15,7 @@ struct Key specialKeys[] = {
     {0x08, "<BACK>"},
     {0x09, "<TAB>"},
     {0x0C, "<CLEAR>"},
-    {0x0D, "<RETURN>"},
+    {0x0D, "<ENTER>"},
     {0x10, "<SHIFT>"},
     {0x11, "<CONTROL>"},
     {0x12, "<MENU>"},
@@ -84,10 +84,10 @@ struct Key specialKeys[] = {
     {0x91, "<SCROLL>"},
     {0xA0, "<LSHIFT>"},
     {0xA1, "<RSHIFT>"},
-    {0xA2, "<LCONTROL>"},
-    {0xA3, "<RCONTROL>"},
-    {0xA4, "<LMENU>"},
-    {0xA5, "<RMENU>"},
+    {0xA2, "<Ctrl>"},
+    {0xA3, "<Ctrl>"},
+    {0xA4, "<Alt>"},
+    {0xA5, "<Alt>"},
     {0xA6, "<BROWSER_BACK>"},
     {0xA7, "<BROWSER_FORWARD>"},
     {0xA8, "<BROWSER_REFRESH>"},
@@ -136,48 +136,76 @@ size_t nSpecialKeys = sizeof(specialKeys) / sizeof(Key);
 HHOOK kbdhook;
 void showText(const char *text, BOOL forceNewStroke = FALSE);
 
-WORD GetSymbolFromVK(UINT vk, UINT sc)
-{
+WORD GetSymbolFromVK(UINT vk, UINT sc, BOOL mod) {
     BYTE btKeyState[256];
     WORD Symbol = 0;
     HKL hklLayout = GetKeyboardLayout(0);
-    for(int i = 0; i < 256; i++) {
-        btKeyState[i] = (BYTE)GetKeyState(i);
+    if(mod) {
+        GetKeyboardState(btKeyState);
+    } else {
+        for(int i = 0; i < 256; i++) {
+            btKeyState[i] = (BYTE)GetKeyState(i);
+        }
     }
     if(ToAsciiEx(vk, sc, btKeyState, &Symbol, 0, hklLayout) == 1) {
         return Symbol;
     }
     return 0;
 }
-
+const char* getSpecialKey(UINT vk) {
+    static char unknown[32];
+    for (size_t i=0; i < nSpecialKeys; ++i) {
+        if(specialKeys[i].val == vk) {
+            return specialKeys[i].label;
+        }
+    }
+    sprintf(unknown, "0x%02x", vk);
+    return unknown;
+}
 LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
 {
+    static char modifierkey[32] = "\0";
     KBDLLHOOKSTRUCT k = *(KBDLLHOOKSTRUCT *)lp;
-    char c[32];
+    static char c[64];
+    const char * theKey = NULL;
 
     if(nCode < 0)
         return CallNextHookEx(kbdhook, nCode, wp, lp);
 
-    if(wp == WM_KEYDOWN) {
-        BOOL special = FALSE;
-        if(k.vkCode == 0x08 || k.vkCode == 0x09 || k.vkCode == 0x0D || k.vkCode == 0x1B || k.vkCode == 0x20) {
-            special = TRUE;
+    if(wp == WM_KEYUP || wp == WM_SYSKEYUP) {
+        if(k.vkCode >= 0xA2 && k.vkCode <= 0xA5) {
+            modifierkey[0] = '\0';
+            //showText(getSpecialKey(k.vkCode), TRUE);
         }
-        if(!special) {
-            WORD a = GetSymbolFromVK(k.vkCode, k.scanCode);
-            if(a > 0) {
+    } else if(wp == WM_KEYDOWN || wp == WM_SYSKEYDOWN) {
+        if(k.vkCode >= 0xA2 && k.vkCode <= 0xA5) {
+            if(modifierkey[0] == '\0') {
+                strcpy(modifierkey, getSpecialKey(k.vkCode));
+            }
+        } else {
+            WORD a = 0;
+            BOOL fin = FALSE;
+            BOOL mod = modifierkey[0] != '\0';
+            if(k.vkCode == 0x08 || k.vkCode == 0x09 || k.vkCode == 0x0D || k.vkCode == 0x1B || k.vkCode == 0x20) {
+                theKey = getSpecialKey(k.vkCode);
+                fin = TRUE;
+            } else if( (a = GetSymbolFromVK(k.vkCode, k.scanCode, mod)) > 0) {
                 c[0] = (char)a;
                 c[1] = '\0';
-                showText(c);
-            } else {
-                special = TRUE;
+                theKey = c;
+            } else if(k.vkCode != 0xA0 && k.vkCode != 0xA1) {
+                theKey = getSpecialKey(k.vkCode);
+                fin = TRUE;
             }
-        }
-        if(special) {
-            for (size_t i=0; i < nSpecialKeys; ++i) {
-                if(specialKeys[i].val == k.vkCode) {
-                    showText(specialKeys[i].label, TRUE);
-                    break;
+
+            if(theKey) {
+                if(mod) {
+                    char tmp[64];
+                    strcpy(tmp, modifierkey);
+                    sprintf(&tmp[strlen(tmp)-1], " - %s>", theKey);
+                    showText(tmp, TRUE);
+                } else {
+                    showText(theKey, fin);
                 }
             }
         }
