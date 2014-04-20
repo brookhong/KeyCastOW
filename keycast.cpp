@@ -40,9 +40,9 @@ HWND hMainWnd;
 HFONT hlabelFont;
 HINSTANCE hInstance;
 HDC hdcBuffer;
+
 #define IDI_TRAY       100
 #define WM_TRAYMSG     101
-
 #define MENU_CONFIG    32
 #define MENU_EXIT      33
 void DrawAlphaBlend (HDC hdcwnd, int i)
@@ -330,6 +330,8 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
             drawLabels(hdc);
             EndPaint(hWnd, &ps);
             break;
+
+        // trayicon
         case WM_CREATE:
             {
                 memset( &nid, 0, sizeof( nid ) );
@@ -353,7 +355,6 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
             {
                 switch ( lParam )
                 {
-                    case WM_LBUTTONUP:
                     case WM_RBUTTONUP:
                         {
                             POINT pnt;
@@ -362,6 +363,9 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
                             TrackPopupMenu( hPopMenu, TPM_LEFTALIGN, pnt.x, pnt.y, 0, hWnd, NULL );
                         }
                         break;
+                    case WM_LBUTTONDBLCLK:
+                        SendMessage( hWnd, WM_COMMAND, MENU_CONFIG, 0 );
+                        return 0;
                 }
             }
             break;
@@ -390,6 +394,8 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
                 }
             }
             break;
+
+        // hold mouse to move
         case WM_LBUTTONDOWN:
             SetCapture(hWnd);
             GetCursorPos(&s_last_mouse);
@@ -413,6 +419,7 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
         case WM_LBUTTONUP:
             ReleaseCapture();
             break;
+
         case WM_DESTROY:
             PostQuitMessage(0);
             break;
