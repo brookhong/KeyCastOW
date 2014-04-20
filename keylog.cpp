@@ -207,19 +207,25 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
     if(nCode < 0)
         return CallNextHookEx(kbdhook, nCode, wp, lp);
 
+    static BOOL fin = FALSE;
     if(wp == WM_KEYUP || wp == WM_SYSKEYUP) {
-        if(k.vkCode >= 0xA2 && k.vkCode <= 0xA5) {
+        if(k.vkCode >= 0xA2 && k.vkCode <= 0xA5 ||
+                k.vkCode == 0x5B || k.vkCode == 0x5C) {
             modifierkey[0] = '\0';
-            //showText(getSpecialKey(k.vkCode), TRUE);
+            if(!fin) {
+                // show Ctrl/Alt/Win keys only when they're not used as modifier.
+                showText(getModSpecialKey(k.vkCode, FALSE), TRUE);
+            }
         }
     } else if(wp == WM_KEYDOWN || wp == WM_SYSKEYDOWN) {
-        if(k.vkCode >= 0xA2 && k.vkCode <= 0xA5) {
+        fin = FALSE;
+        if(k.vkCode >= 0xA2 && k.vkCode <= 0xA5 ||
+                k.vkCode == 0x5B || k.vkCode == 0x5C) {
             if(modifierkey[0] == '\0') {
                 wcscpy_s(modifierkey, sizeof(modifierkey), getSpecialKey(k.vkCode));
             }
         } else {
             WORD a = 0;
-            BOOL fin = FALSE;
             BOOL mod = modifierkey[0] != '\0';
             if(k.vkCode == 0x08 || k.vkCode == 0x09 || k.vkCode == 0x0D || k.vkCode == 0x1B || k.vkCode == 0x20) {
                 // for <BS>/<Tab>/<ENTER>/<ESC>/<SPACE>, treat them as specialKeys
@@ -233,13 +239,13 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
             }
 
             if(theKey) {
+                WCHAR tmp[64];
                 if(mod) {
-                    WCHAR tmp[64];
+                    fin = TRUE;
                     swprintf(tmp, 64, L"<%s - %s>", modifierkey, theKey);
-                    showText(tmp, TRUE);
-                } else {
-                    showText(theKey, fin);
+                    theKey = tmp;
                 }
+                showText(theKey, fin);
             }
         }
     }
