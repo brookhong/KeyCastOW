@@ -136,7 +136,8 @@ size_t nSpecialKeys = sizeof(specialKeys) / sizeof(Key);
 HHOOK kbdhook;
 void showText(LPCWSTR text, BOOL forceNewStroke = FALSE);
 
-WORD GetSymbolFromVK(UINT vk, UINT sc, BOOL mod) {
+LPCWSTR GetSymbolFromVK(UINT vk, UINT sc, BOOL mod) {
+    static WCHAR symbol[32];
     BYTE btKeyState[256];
     WORD Symbol = 0;
     HKL hklLayout = GetKeyboardLayout(0);
@@ -148,9 +149,16 @@ WORD GetSymbolFromVK(UINT vk, UINT sc, BOOL mod) {
         }
     }
     if(ToAsciiEx(vk, sc, btKeyState, &Symbol, 0, hklLayout) == 1) {
-        return Symbol;
+        if(mod && GetKeyState(VK_SHIFT) < 0) {
+            // prefix "Shift - " only when Ctrl or Alt is hold (mod as TRUE)
+            swprintf(symbol, 32, L"Shift - %c", (WCHAR)Symbol);
+        } else {
+            symbol[0] = (WCHAR)Symbol;
+            symbol[1] = L'\0';
+        }
+        return symbol;
     }
-    return 0;
+    return NULL;
 }
 LPCWSTR getSpecialKey(UINT vk) {
     static WCHAR unknown[32];
@@ -165,17 +173,26 @@ LPCWSTR getSpecialKey(UINT vk) {
 
 LPCWSTR getModSpecialKey(UINT vk, BOOL mod = FALSE) {
     static WCHAR modsk[64];
-    WCHAR tmp[64];
-    LPCWSTR sk = getSpecialKey(vk);
-
-    if(GetKeyState(VK_SHIFT) < 0) {
-        swprintf(tmp, 64, L"Shift - %s", sk);
-        sk= tmp;
-    }
-    if(!mod) {
-        swprintf(modsk, 64, L"<%s>", sk);
+    if( vk == 0xA0 || vk == 0xA1) {
+        if(!mod) {
+            // show nothing if press SHIFT only
+            return NULL;
+        } else {
+            wcscpy_s(modsk, 64, L"Shift");
+        }
     } else {
-        swprintf(modsk, 64, L"%s", sk);
+        WCHAR tmp[64];
+        LPCWSTR sk = getSpecialKey(vk);
+        if(GetKeyState(VK_SHIFT) < 0) {
+            // prefix "Shift - "
+            swprintf(tmp, 64, L"Shift - %s", sk);
+            sk= tmp;
+        }
+        if(!mod) {
+            swprintf(modsk, 64, L"<%s>", sk);
+        } else {
+            swprintf(modsk, 64, L"%s", sk);
+        }
     }
 
     return modsk;
@@ -205,13 +222,12 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
             BOOL fin = FALSE;
             BOOL mod = modifierkey[0] != '\0';
             if(k.vkCode == 0x08 || k.vkCode == 0x09 || k.vkCode == 0x0D || k.vkCode == 0x1B || k.vkCode == 0x20) {
+                // for <BS>/<Tab>/<ENTER>/<ESC>/<SPACE>, treat them as specialKeys
                 theKey = getModSpecialKey(k.vkCode, mod);
                 fin = TRUE;
-            } else if( (a = GetSymbolFromVK(k.vkCode, k.scanCode, mod)) > 0) {
-                c[0] = (WCHAR)a;
-                c[1] = L'\0';
-                theKey = c;
-            } else if(k.vkCode != 0xA0 && k.vkCode != 0xA1) {
+            } else if( !(theKey = GetSymbolFromVK(k.vkCode, k.scanCode, mod))) {
+                // otherwise try to translate with ToAsciiEx
+                // if fails to translate with ToAsciiEx, then treat it as specialKeys
                 theKey = getModSpecialKey(k.vkCode, mod);
                 fin = TRUE;
             }
