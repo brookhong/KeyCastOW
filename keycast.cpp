@@ -1,9 +1,9 @@
 // Copyright © 2014 Brook Hong. All Rights Reserved.
 //
 
-// msbuild keycastow.vcxproj
+// msbuild /p:platform=win32 /p:Configuration=Release
 // msbuild keycastow.vcxproj /t:Clean
-// rc keycastow.rc && cl keycast.cpp keylog.cpp keycastow.res user32.lib shell32.lib gdi32.lib Comdlg32.lib
+// rc keycastow.rc && cl -DUNICODE -D_UNICODE keycast.cpp keylog.cpp keycastow.res user32.lib shell32.lib gdi32.lib Comdlg32.lib comctl32.lib
 
 #include <windows.h>
 #include <Commctrl.h>
