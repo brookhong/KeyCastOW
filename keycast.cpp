@@ -23,8 +23,8 @@ struct KeyLabel{
 };
 
 unsigned int keyStrokeDelay = 500;
-unsigned int lingerTime = 1200;         // 1s by default
-unsigned int fadeDuration = 600;       // 1s by default
+unsigned int lingerTime = 1200;
+unsigned int fadeDuration = 600;
 unsigned int labelSpacing = 30;
 COLORREF textColor = RGB(0,240, 33);
 COLORREF bgColor = RGB(0x7f,0,0x8f);
@@ -47,6 +47,7 @@ HDC hdcBuffer;
 #define WM_TRAYMSG     101
 #define MENU_CONFIG    32
 #define MENU_EXIT      33
+#define MENU_RESTORE      34
 void DrawAlphaBlend (HDC hdcwnd, int i)
 {
     BLENDFUNCTION bf;      // structure for alpha blending
@@ -247,7 +248,91 @@ void updateMainWindow() {
         keyLabels[i].rect.bottom = (box.bottom+4)*(i+1)+labelSpacing*i;
     }
 }
+void initSettings() {
+    keyStrokeDelay = 500;
+    lingerTime = 1200;
+    fadeDuration = 600;
+    labelSpacing = 30;
+    textColor = RGB(0,240, 33);
+    bgColor = RGB(0x7f,0,0x8f);
+    opacity = 0.78f;
+    memset(&labelFont, 0, sizeof(labelFont));
+    labelFont.lfCharSet = DEFAULT_CHARSET;
+    labelFont.lfHeight = -36;
+    labelFont.lfPitchAndFamily = DEFAULT_PITCH;
+    labelFont.lfWeight  = FW_NORMAL;
+    labelFont.lfOutPrecision = OUT_DEFAULT_PRECIS;
+    labelFont.lfClipPrecision = CLIP_DEFAULT_PRECIS;
+    labelFont.lfQuality = ANTIALIASED_QUALITY;
+    wcscpy_s(labelFont.lfFaceName, sizeof(labelFont.lfFaceName), TEXT("Arial"));
+}
+BOOL saveSettings() {
+    WCHAR tmp[256];
+    BOOL res = TRUE;
 
+    HKEY hRootKey, hChildKey;
+    if(RegOpenCurrentUser(KEY_WRITE, &hRootKey) != ERROR_SUCCESS)
+        return FALSE;
+
+    if(RegCreateKeyEx(hRootKey, L"Software\\keycastow", 0, NULL, REG_OPTION_NON_VOLATILE, KEY_READ | KEY_WRITE, NULL, &hChildKey, NULL) != ERROR_SUCCESS) {
+        RegCloseKey(hRootKey);
+        return FALSE;
+    }
+
+    if(RegSetKeyValue(hChildKey, NULL, L"keyStrokeDelay", REG_DWORD, (LPCVOID)&keyStrokeDelay, sizeof(keyStrokeDelay)) != ERROR_SUCCESS) {
+        res = FALSE;
+    }
+
+    RegSetKeyValue(hChildKey, NULL, L"lingerTime", REG_DWORD, (LPCVOID)&lingerTime, sizeof(lingerTime));
+    RegSetKeyValue(hChildKey, NULL, L"fadeDuration", REG_DWORD, (LPCVOID)&fadeDuration, sizeof(fadeDuration));
+    RegSetKeyValue(hChildKey, NULL, L"labelSpacing", REG_DWORD, (LPCVOID)&labelSpacing, sizeof(labelSpacing));
+    RegSetKeyValue(hChildKey, NULL, L"bgColor", REG_DWORD, (LPCVOID)&bgColor, sizeof(bgColor));
+    RegSetKeyValue(hChildKey, NULL, L"textColor", REG_DWORD, (LPCVOID)&textColor, sizeof(textColor));
+    RegSetKeyValue(hChildKey, NULL, L"labelFont", REG_BINARY, (LPCVOID)&labelFont, sizeof(labelFont));
+    swprintf(tmp, 256, L"%f", opacity);
+    RegSetKeyValue(hChildKey, NULL, L"opacity", REG_EXPAND_SZ, (LPCVOID)tmp, sizeof(tmp));
+
+    RegCloseKey(hRootKey);
+    RegCloseKey(hChildKey);
+    return res;
+}
+BOOL loadSettings() {
+    BOOL res = TRUE;
+    HKEY hRootKey, hChildKey;
+    DWORD disposition; // For checking if key was created or only opened
+    initSettings();
+    if(RegOpenCurrentUser(KEY_WRITE | KEY_READ, &hRootKey) != ERROR_SUCCESS)
+        return FALSE;
+    if(RegCreateKeyEx(hRootKey, TEXT("SOFTWARE\\keycastow"), 0, NULL, REG_OPTION_NON_VOLATILE, KEY_READ | KEY_WRITE,
+                NULL, &hChildKey, &disposition) != ERROR_SUCCESS) {
+        RegCloseKey(hRootKey);
+        return FALSE;
+    }
+
+    DWORD size = sizeof(DWORD);
+    if(disposition == REG_OPENED_EXISTING_KEY) {
+        RegGetValue(hChildKey, NULL, L"keyStrokeDelay", RRF_RT_DWORD, NULL, &keyStrokeDelay, &size);
+        RegGetValue(hChildKey, NULL, L"lingerTime", RRF_RT_DWORD, NULL, &lingerTime, &size);
+        RegGetValue(hChildKey, NULL, L"fadeDuration", RRF_RT_DWORD, NULL, &fadeDuration, &size);
+        RegGetValue(hChildKey, NULL, L"labelSpacing", RRF_RT_DWORD, NULL, &labelSpacing, &size);
+        RegGetValue(hChildKey, NULL, L"bgColor", RRF_RT_DWORD, NULL, &bgColor, &size);
+        RegGetValue(hChildKey, NULL, L"textColor", RRF_RT_DWORD, NULL, &textColor, &size);
+
+        WCHAR tmp[256];
+        size = sizeof(tmp);
+        RegGetValue(hChildKey, NULL, L"opacity", RRF_RT_REG_EXPAND_SZ, NULL, tmp, &size);
+        opacity = (float)_wtof(tmp);
+
+        size = sizeof(labelFont);
+        RegGetValue(hChildKey, NULL, L"labelFont", RRF_RT_REG_BINARY, NULL, &labelFont, &size);
+    } else {
+        saveSettings();
+    }
+
+    RegCloseKey(hRootKey);
+    RegCloseKey(hChildKey);
+    return res;
+}
 BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     WCHAR tmp[256];
@@ -324,6 +409,7 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     opacity = (float)_wtof(tmp);
                     updateMainWindow();
                     InvalidateRect(hMainWnd, NULL, TRUE);
+                    saveSettings();
                 case IDCANCEL:
                     EndDialog(hwndDlg, wParam);
                     return TRUE;
@@ -364,6 +450,7 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
 
                 hPopMenu = CreatePopupMenu();
                 AppendMenu( hPopMenu, MF_STRING, MENU_CONFIG,  L"&Settings..." );
+                AppendMenu( hPopMenu, MF_STRING, MENU_RESTORE,  L"&Restore default settings" );
                 AppendMenu( hPopMenu, MF_STRING, MENU_EXIT,    L"E&xit" );
                 SetMenuDefaultItem( hPopMenu, MENU_CONFIG, FALSE );
             }
@@ -401,7 +488,12 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
                             // Cancel the command.
                         }
                         break;
-
+                    case MENU_RESTORE:
+                        initSettings();
+                        saveSettings();
+                        updateMainWindow();
+                        InvalidateRect(hMainWnd, NULL, TRUE);
+                        break;
                     case MENU_EXIT:
                         Shell_NotifyIcon( NIM_DELETE, &nid );
                         ExitProcess(0);
@@ -503,15 +595,7 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         return 0;
     }
 
-    memset(&labelFont, 0, sizeof(labelFont));
-    labelFont.lfCharSet = DEFAULT_CHARSET;
-    labelFont.lfHeight = -36;
-    labelFont.lfPitchAndFamily = DEFAULT_PITCH;
-    labelFont.lfWeight  = FW_NORMAL;
-    labelFont.lfOutPrecision = OUT_DEFAULT_PRECIS;
-    labelFont.lfClipPrecision = CLIP_DEFAULT_PRECIS;
-    labelFont.lfQuality = ANTIALIASED_QUALITY;
-    wcscpy_s(labelFont.lfFaceName, sizeof(labelFont.lfFaceName), TEXT("Arial"));
+    loadSettings();
     hlabelFont = CreateFontIndirect(&labelFont);
 
     HDC hdc = GetDC(hMainWnd);
