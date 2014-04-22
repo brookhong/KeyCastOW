@@ -29,6 +29,7 @@ unsigned int labelSpacing = 30;
 COLORREF textColor = RGB(0,240, 33);
 COLORREF bgColor = RGB(0x7f,0,0x8f);
 LOGFONT labelFont;
+float opacity = 0.78f;
 
 unsigned int labelCount = 10;
 KeyLabel keyLabels[10];
@@ -229,6 +230,7 @@ BOOL ColorDialog ( HWND hWnd, COLORREF &clr ) {
 void updateMainWindow() {
     HBRUSH brush = CreateSolidBrush(bgColor);
     SetClassLongPtr(hMainWnd, GCLP_HBRBACKGROUND, (LONG)brush);
+    SetLayeredWindowAttributes(hMainWnd, 0, (BYTE)255*opacity, LWA_ALPHA);
 
     HFONT hFontOld = (HFONT)SelectObject(hdcBuffer, hlabelFont);
     RECT box = {};
@@ -260,6 +262,8 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
             SetDlgItemText(hwndDlg, IDC_FADEDURATION, tmp);
             swprintf(tmp, 256, L"%d", labelSpacing);
             SetDlgItemText(hwndDlg, IDC_LABELSPACING, tmp);
+            swprintf(tmp, 256, L"%f", opacity);
+            SetDlgItemText(hwndDlg, IDC_OPACITY, tmp);
             return TRUE;
         case WM_NOTIFY:
             switch (((LPNMHDR)lParam)->code)
@@ -316,6 +320,8 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     fadeDuration = _wtoi(tmp);
                     GetDlgItemText(hwndDlg, IDC_LABELSPACING, tmp, 256);
                     labelSpacing = _wtoi(tmp);
+                    GetDlgItemText(hwndDlg, IDC_OPACITY, tmp, 256);
+                    opacity = (float)_wtof(tmp);
                     updateMainWindow();
                     InvalidateRect(hMainWnd, NULL, TRUE);
                 case IDCANCEL:
@@ -410,6 +416,7 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
         case WM_LBUTTONDOWN:
             SetCapture(hWnd);
             GetCursorPos(&s_last_mouse);
+            showTimer.Stop();
             break;
         case WM_MOUSEMOVE:
             if (GetCapture()==hWnd)
@@ -429,6 +436,7 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
             break;
         case WM_LBUTTONUP:
             ReleaseCapture();
+            showTimer.Start(100);
             break;
 
         case WM_DESTROY:
@@ -490,7 +498,6 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
             hThisInst,
             NULL
             );
-    SetLayeredWindowAttributes(hMainWnd, 0, 200, LWA_ALPHA);
     if( !hMainWnd)    {
         MessageBox(NULL, L"Could not create window", L"Error", MB_OK);
         return 0;

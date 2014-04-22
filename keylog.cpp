@@ -46,8 +46,8 @@ struct Key specialKeys[] = {
     {0x2D, L"INSERT"},
     {0x2E, L"DELETE"},
     {0x2F, L"HELP"},
-    {0x5B, L"LWIN"},
-    {0x5C, L"RWIN"},
+    {0x5B, L"WIN"},
+    {0x5C, L"WIN"},
     {0x5D, L"APPS"},
     {0x5F, L"SLEEP"},
     {0x6A, L"MULTIPLY"},
@@ -199,6 +199,28 @@ LPCWSTR getModSpecialKey(UINT vk, BOOL mod = FALSE) {
 
     return modsk;
 }
+
+// remove a modifier vk from modifierkeys
+// for example, remove "Alt" from "Ctrl - Alt"
+void cleanModifier(UINT vk, LPWSTR modifierkeys) {
+    WCHAR tmp[64];
+    LPCWSTR ck = getSpecialKey(vk);
+    LPWSTR p = wcsstr(modifierkeys, ck);
+    if(p == modifierkeys) {
+        if(wcslen(modifierkeys) == wcslen(p)) {
+            // current key is the only modifier
+            modifierkeys[0] = '\0';
+        } else {
+            // remove current key and the " - " after it
+            wcscpy_s(tmp, sizeof(tmp), modifierkeys+wcslen(ck)+sizeof(" - "));
+            wcscpy_s(modifierkeys, sizeof(modifierkeys), tmp);
+        }
+    } else if(p) {
+        // get rid of all after current key including the delimiter
+        *(p-sizeof(" - ")+1) = '\0';
+    }
+}
+
 LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
 {
     static WCHAR modifierkey[32] = L"\0";
@@ -213,18 +235,24 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
     if(wp == WM_KEYUP || wp == WM_SYSKEYUP) {
         if(k.vkCode >= 0xA2 && k.vkCode <= 0xA5 ||
                 k.vkCode == 0x5B || k.vkCode == 0x5C) {
-            modifierkey[0] = '\0';
-            if(!fin) {
+            if(!fin && modifierkey[0] != '\0') {
                 // show Ctrl/Alt/Win keys only when they're not used as modifier.
-                showText(getModSpecialKey(k.vkCode, FALSE), TRUE);
+                swprintf(c, 64, L"<%s>", modifierkey);
+                showText(c, TRUE);
             }
+            cleanModifier(k.vkCode, modifierkey);
         }
     } else if(wp == WM_KEYDOWN || wp == WM_SYSKEYDOWN) {
         fin = FALSE;
-        if(k.vkCode >= 0xA2 && k.vkCode <= 0xA5 ||
-                k.vkCode == 0x5B || k.vkCode == 0x5C) {
+        if(k.vkCode >= 0xA2 && k.vkCode <= 0xA5 ||          // ctrl / alt
+                k.vkCode == 0x5B || k.vkCode == 0x5C) {     // win
+            LPCWSTR ck = getSpecialKey(k.vkCode);
             if(modifierkey[0] == '\0') {
-                wcscpy_s(modifierkey, sizeof(modifierkey), getSpecialKey(k.vkCode));
+                wcscpy_s(modifierkey, sizeof(modifierkey), ck);
+            } else if(!wcsstr(modifierkey, ck)) {
+                WCHAR tmp[32];
+                wcscpy_s(tmp, sizeof(tmp), modifierkey);
+                swprintf(modifierkey, sizeof(modifierkey), L"%s - %s", tmp, ck);
             }
         } else {
             WORD a = 0;
