@@ -15,6 +15,7 @@ CTimer showTimer;
 CTimer strokeTimer;
 
 #define MAXCHARSINLINE 64
+#define VISIBLECHARS 16
 struct KeyLabel{
     RECT rect;
     WCHAR text[MAXCHARSINLINE];
@@ -63,7 +64,7 @@ void DrawAlphaBlend (HDC hdcwnd, int i)
     if ((!ulWindowWidth) || (!ulWindowHeight))
         return;
 
-    TextOut(hdcwnd, 0, keyLabels[i].rect.top, keyLabels[i].text, wcslen(keyLabels[i].text));
+    TextOut(hdcwnd, 8, keyLabels[i].rect.top, keyLabels[i].text, wcslen(keyLabels[i].text));
 
     // zero the memory for the bitmap info
     ZeroMemory(&bmi, sizeof(BITMAPINFO));
@@ -82,9 +83,6 @@ void DrawAlphaBlend (HDC hdcwnd, int i)
     hbitmap = CreateDIBSection(hdcBuffer, &bmi, DIB_RGB_COLORS, &pvBits, NULL, 0x0);
     SelectObject(hdcBuffer, hbitmap);
 
-    // in top window area, constant alpha = 50%, but no source alpha
-    // the color format for each pixel is 0xaarrggbb
-    // set all pixels to blue and set source alpha to zero
     for (y = 0; y < ulWindowHeight; y++)
         for (x = 0; x < ulWindowWidth; x++)
             ((UINT32 *)pvBits)[x + y * ulWindowWidth] = 0xffffffff;
@@ -93,6 +91,17 @@ void DrawAlphaBlend (HDC hdcwnd, int i)
     bf.BlendFlags = 0;
     int alpha = 255-(int)(255.0*keyLabels[i].time/fadeDuration);
     alpha = (alpha < 0) ? 0: alpha;
+    if(keyLabels[i].time == 0 && keyLabels[i].rect.right) {
+        // remove the region for this label
+        HRGN hRegion = CreateRectRgn(0,0,0,0);
+        HRGN hRgnLabel = CreateRoundRectRgn (keyLabels[i].rect.left, keyLabels[i].rect.top, keyLabels[i].rect.right, keyLabels[i].rect.bottom, 15, 15);
+        GetWindowRgn(hMainWnd, hRegion);
+        CombineRgn(hRegion, hRegion, hRgnLabel, RGN_XOR);
+        DeleteObject(hRgnLabel);
+        SetWindowRgn(hMainWnd, hRegion, TRUE);
+        InvalidateRect(hMainWnd, &keyLabels[i].rect, TRUE);
+        keyLabels[i].rect.right = 0;
+    }
     bf.SourceConstantAlpha = alpha;  // half of 0xff = 50% transparency
     bf.AlphaFormat = 0;             // ignore source alpha channel
     //bf.AlphaFormat = AC_SRC_ALPHA;  // use source alpha
@@ -109,8 +118,7 @@ void updateLabel(int i) {
 }
 void drawLabels(HDC hdc) {
     SetTextColor(hdc, textColor);
-    SetBkColor (hdc, bgColor);
-    //SetBkMode (hdc, TRANSPARENT);
+    SetBkMode (hdc, TRANSPARENT);
     HFONT hFontOld = (HFONT)SelectObject(hdc, hlabelFont);
     for(unsigned int i = 0; i < labelCount; i ++) {
         DrawAlphaBlend(hdc, i);
@@ -137,7 +145,7 @@ static void startNewStroke() {
 void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
     HRGN hRgnLabel;
     HRGN hRegion = CreateRectRgn(0,0,0,0);
-    if(newStroke || forceNewStroke || wcslen(keyLabels[labelCount-1].text) > MAXCHARSINLINE/2) {
+    if(newStroke || forceNewStroke || wcslen(keyLabels[labelCount-1].text) > VISIBLECHARS-1) {
         unsigned int i;
         for (i = 1; i < labelCount; i++) {
             if(keyLabels[i].time > 0) {
@@ -219,11 +227,14 @@ BOOL ColorDialog ( HWND hWnd, COLORREF &clr ) {
 }
 
 void updateMainWindow() {
+    HBRUSH brush = CreateSolidBrush(bgColor);
+    SetClassLongPtr(hMainWnd, GCLP_HBRBACKGROUND, (LONG)brush);
+
     HFONT hFontOld = (HFONT)SelectObject(hdcBuffer, hlabelFont);
     RECT box = {};
     DrawText(hdcBuffer, L"A", 1, &box, DT_CALCRECT);
     int maxHeight = (box.bottom+4+labelSpacing)*labelCount;
-    int maxWidth = box.right*16+18;
+    int maxWidth = box.right*(VISIBLECHARS+2)+18;
     RECT desktopRect;
     SystemParametersInfo(SPI_GETWORKAREA,NULL,&desktopRect,NULL);
     SetWindowPos(hMainWnd, HWND_TOPMOST, desktopRect.right - maxWidth, desktopRect.bottom - maxHeight, maxWidth, maxHeight, 0);
@@ -479,8 +490,7 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
             hThisInst,
             NULL
             );
-    //SetLayeredWindowAttributes(hMainWnd, 0, (255 * 50) / 100, LWA_ALPHA);
-    SetLayeredWindowAttributes (hMainWnd, RGB(255,255,255), 0x1f, LWA_COLORKEY);
+    SetLayeredWindowAttributes(hMainWnd, 0, 200, LWA_ALPHA);
     if( !hMainWnd)    {
         MessageBox(NULL, L"Could not create window", L"Error", MB_OK);
         return 0;

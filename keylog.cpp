@@ -188,7 +188,9 @@ LPCWSTR getModSpecialKey(UINT vk, BOOL mod = FALSE) {
             swprintf(tmp, 64, L"Shift - %s", sk);
             sk= tmp;
         }
-        if(!mod) {
+        if(!mod && HIBYTE(sk[0]) == 0) {
+            // if the special key is not used with modifierkey, and has not been replaced with visible symbol
+            // then surround it with <>
             swprintf(modsk, 64, L"<%s>", sk);
         } else {
             swprintf(modsk, 64, L"%s", sk);
