@@ -30,6 +30,8 @@ COLORREF textColor = RGB(0,240, 33);
 COLORREF bgColor = RGB(0x7f,0,0x8f);
 LOGFONT labelFont;
 DWORD opacity = 198;
+UINT tcModifiers = MOD_ALT;
+UINT tcKey = 0x42;      // 0x42 is 'b'
 
 DWORD labelCount = 10;
 KeyLabel keyLabels[10];
@@ -271,6 +273,8 @@ void initSettings() {
     textColor = RGB(0,240, 33);
     bgColor = RGB(0x7f,0,0x8f);
     opacity = 198;
+    tcModifiers = MOD_ALT;
+    tcKey = 0x42;
     memset(&labelFont, 0, sizeof(labelFont));
     labelFont.lfCharSet = DEFAULT_CHARSET;
     labelFont.lfHeight = -37;
@@ -304,6 +308,8 @@ BOOL saveSettings() {
     RegSetKeyValue(hChildKey, NULL, L"textColor", REG_DWORD, (LPCVOID)&textColor, sizeof(textColor));
     RegSetKeyValue(hChildKey, NULL, L"labelFont", REG_BINARY, (LPCVOID)&labelFont, sizeof(labelFont));
     RegSetKeyValue(hChildKey, NULL, L"opacity", REG_DWORD, (LPCVOID)&opacity, sizeof(opacity));
+    RegSetKeyValue(hChildKey, NULL, L"tcModifiers", REG_DWORD, (LPCVOID)&tcModifiers, sizeof(tcModifiers));
+    RegSetKeyValue(hChildKey, NULL, L"tcKey", REG_DWORD, (LPCVOID)&tcKey, sizeof(tcKey));
 
     RegCloseKey(hRootKey);
     RegCloseKey(hChildKey);
@@ -331,6 +337,8 @@ BOOL loadSettings() {
         RegGetValue(hChildKey, NULL, L"bgColor", RRF_RT_DWORD, NULL, &bgColor, &size);
         RegGetValue(hChildKey, NULL, L"textColor", RRF_RT_DWORD, NULL, &textColor, &size);
         RegGetValue(hChildKey, NULL, L"opacity", RRF_RT_DWORD, NULL, &opacity, &size);
+        RegGetValue(hChildKey, NULL, L"tcModifiers", RRF_RT_DWORD, NULL, &tcModifiers, &size);
+        RegGetValue(hChildKey, NULL, L"tcKey", RRF_RT_DWORD, NULL, &tcKey, &size);
 
         size = sizeof(labelFont);
         RegGetValue(hChildKey, NULL, L"labelFont", RRF_RT_REG_BINARY, NULL, &labelFont, &size);
@@ -348,16 +356,28 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
     switch (msg)
     {
         case WM_INITDIALOG:
-            swprintf(tmp, 256, L"%d", keyStrokeDelay);
-            SetDlgItemText(hwndDlg, IDC_KEYSTROKEDELAY, tmp);
-            swprintf(tmp, 256, L"%d", lingerTime);
-            SetDlgItemText(hwndDlg, IDC_LINGERTIME, tmp);
-            swprintf(tmp, 256, L"%d", fadeDuration);
-            SetDlgItemText(hwndDlg, IDC_FADEDURATION, tmp);
-            swprintf(tmp, 256, L"%d", labelSpacing);
-            SetDlgItemText(hwndDlg, IDC_LABELSPACING, tmp);
-            swprintf(tmp, 256, L"%d", opacity);
-            SetDlgItemText(hwndDlg, IDC_OPACITY, tmp);
+            {
+                swprintf(tmp, 256, L"%d", keyStrokeDelay);
+                SetDlgItemText(hwndDlg, IDC_KEYSTROKEDELAY, tmp);
+                swprintf(tmp, 256, L"%d", lingerTime);
+                SetDlgItemText(hwndDlg, IDC_LINGERTIME, tmp);
+                swprintf(tmp, 256, L"%d", fadeDuration);
+                SetDlgItemText(hwndDlg, IDC_FADEDURATION, tmp);
+                swprintf(tmp, 256, L"%d", labelSpacing);
+                SetDlgItemText(hwndDlg, IDC_LABELSPACING, tmp);
+                swprintf(tmp, 256, L"%d", opacity);
+                SetDlgItemText(hwndDlg, IDC_OPACITY, tmp);
+                CheckDlgButton(hwndDlg, IDC_MODCTRL, (tcModifiers & MOD_CONTROL) ? BST_CHECKED : BST_UNCHECKED);
+                CheckDlgButton(hwndDlg, IDC_MODALT, (tcModifiers & MOD_ALT) ? BST_CHECKED : BST_UNCHECKED);
+                CheckDlgButton(hwndDlg, IDC_MODSHIFT, (tcModifiers & MOD_SHIFT) ? BST_CHECKED : BST_UNCHECKED);
+                CheckDlgButton(hwndDlg, IDC_MODWIN, (tcModifiers & MOD_WIN) ? BST_CHECKED : BST_UNCHECKED);
+                swprintf(tmp, 256, L"%c", MapVirtualKey(tcKey, MAPVK_VK_TO_CHAR));
+                SetDlgItemText(hwndDlg, IDC_TCKEY, tmp);
+                RECT desktopRect, r;
+                GetWindowRect(hwndDlg, &r);
+                SystemParametersInfo(SPI_GETWORKAREA,NULL,&desktopRect,NULL);
+                SetWindowPos(hwndDlg, 0, desktopRect.right - r.right + r.left, desktopRect.bottom - r.bottom + r.top, 0, 0, SWP_NOSIZE);
+            }
             return TRUE;
         case WM_NOTIFY:
             switch (((LPNMHDR)lParam)->code)
@@ -430,10 +450,28 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     labelSpacing = _wtoi(tmp);
                     GetDlgItemText(hwndDlg, IDC_OPACITY, tmp, 256);
                     opacity = _wtoi(tmp);
+                    tcModifiers = 0;
+                    if(BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MODCTRL)) {
+                        tcModifiers |= MOD_CONTROL;
+                    }
+                    if(BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MODALT)) {
+                        tcModifiers |= MOD_ALT;
+                    }
+                    if(BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MODSHIFT)) {
+                        tcModifiers |= MOD_SHIFT;
+                    }
+                    if(BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MODWIN)) {
+                        tcModifiers |= MOD_WIN;
+                    }
+                    GetDlgItemText(hwndDlg, IDC_TCKEY, tmp, 256);
+                    tcKey = VkKeyScanEx(tmp[0], GetKeyboardLayout(0));
+                    UnregisterHotKey(NULL, 1);
+                    if (!RegisterHotKey( NULL, 1, tcModifiers | MOD_NOREPEAT, tcKey)) {
+                        MessageBox(NULL, L"Unable to register hotkey, you probably need go to settings to redefine your hotkey for toggle capturing.", L"Warning", MB_OK|MB_ICONWARNING);
+                    }
                     updateMainWindow();
                     InvalidateRect(hMainWnd, NULL, TRUE);
                     saveSettings();
-                    return TRUE;
                 case IDCANCEL:
                     EndDialog(hwndDlg, wParam);
                     return TRUE;
@@ -615,11 +653,10 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         MessageBox(NULL, L"Could not create window", L"Error", MB_OK);
         return 0;
     }
-    if (!RegisterHotKey( NULL, 1, MOD_ALT | MOD_NOREPEAT, 0x42)) { //0x42 is 'b'
-        MessageBox(NULL, L"Unable to register hotkey.", L"Error", MB_OK);
-    }
-
     loadSettings();
+    if (!RegisterHotKey( NULL, 1, tcModifiers | MOD_NOREPEAT, tcKey)) {
+        MessageBox(NULL, L"Unable to register hotkey, you probably need go to settings to redefine your hotkey for toggle capturing.", L"Warning", MB_OK|MB_ICONWARNING);
+    }
     hlabelFont = CreateFontIndirect(&labelFont);
 
     HDC hdc = GetDC(hMainWnd);
@@ -659,5 +696,6 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     }
 
     UnhookWindowsHookEx(kbdhook);
+    UnregisterHotKey(NULL, 1);
     return msg.wParam;
 }
