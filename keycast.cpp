@@ -37,7 +37,7 @@ KeyLabel keyLabels[10];
 #include "keycast.h"
 #include "keylog.h"
 
-WCHAR *szWinName = L"KeyCast";
+WCHAR *szWinName = L"KeyCastOW";
 HWND hMainWnd;
 HFONT hlabelFont;
 HINSTANCE hInstance;
@@ -592,11 +592,6 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         return 0;
     }
 
-    //INITCOMMONCONTROLSEX ics;
-    //ZeroMemory(&ics, sizeof(ics));
-    //ics.dwSize = sizeof(ics);
-    //ics.dwICC = ICC_LINK_CLASS;
-    //InitCommonControlsEx(&ics);
     INITCOMMONCONTROLSEX icex;
     icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
     icex.dwICC = ICC_LINK_CLASS|ICC_LISTVIEW_CLASSES|ICC_PAGESCROLLER_CLASS
@@ -649,5 +644,6 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         DispatchMessage(&msg);
     }
 
+    UnhookWindowsHookEx(kbdhook);
     return msg.wParam;
 }

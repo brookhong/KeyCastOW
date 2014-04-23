@@ -167,7 +167,7 @@ LPCWSTR getSpecialKey(UINT vk) {
             return specialKeys[i].label;
         }
     }
-    swprintf(unknown, sizeof(unknown), L"0x%02x", vk);
+    swprintf(unknown, 32, L"0x%02x", vk);
     return unknown;
 }
 
@@ -212,20 +212,22 @@ void cleanModifier(UINT vk, LPWSTR modifierkeys) {
             modifierkeys[0] = '\0';
         } else {
             // remove current key and the " - " after it
-            wcscpy_s(tmp, sizeof(tmp), modifierkeys+wcslen(ck)+sizeof(" - "));
-            wcscpy_s(modifierkeys, sizeof(modifierkeys), tmp);
+            // sizeof(" - ") == 4
+            wcscpy_s(tmp, 64, modifierkeys+wcslen(ck)+4);
+            wcscpy_s(modifierkeys, 64, tmp);
         }
     } else if(p) {
         // get rid of all after current key including the delimiter
-        *(p-sizeof(" - ")+1) = '\0';
+        *(p-3) = '\0';
     }
 }
 
 LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
 {
-    static WCHAR modifierkey[32] = L"\0";
+    static WCHAR modifierkey[64] = L"\0";
     KBDLLHOOKSTRUCT k = *(KBDLLHOOKSTRUCT *)lp;
-    static WCHAR c[64];
+    WCHAR c[64] = L"\0";
+    WCHAR tmp[64] = L"\0";
     const WCHAR * theKey = NULL;
 
     if(nCode < 0)
@@ -248,11 +250,10 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
                 k.vkCode == 0x5B || k.vkCode == 0x5C) {     // win
             LPCWSTR ck = getSpecialKey(k.vkCode);
             if(modifierkey[0] == '\0') {
-                wcscpy_s(modifierkey, sizeof(modifierkey), ck);
+                wcscpy_s(modifierkey, 64, ck);
             } else if(!wcsstr(modifierkey, ck)) {
-                WCHAR tmp[32];
-                wcscpy_s(tmp, sizeof(tmp), modifierkey);
-                swprintf(modifierkey, sizeof(modifierkey), L"%s - %s", tmp, ck);
+                wcscpy_s(tmp, 64, modifierkey);
+                swprintf(modifierkey, 64, L"%s - %s", tmp, ck);
             }
         } else {
             WORD a = 0;
@@ -269,7 +270,6 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
             }
 
             if(theKey) {
-                WCHAR tmp[64];
                 if(mod) {
                     fin = TRUE;
                     swprintf(tmp, 64, L"<%s - %s>", modifierkey, theKey);
