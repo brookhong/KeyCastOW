@@ -615,6 +615,9 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         MessageBox(NULL, L"Could not create window", L"Error", MB_OK);
         return 0;
     }
+    if (!RegisterHotKey( NULL, 1, MOD_ALT | MOD_NOREPEAT, 0x42)) { //0x42 is 'b'
+        MessageBox(NULL, L"Unable to register hotkey.", L"Error", MB_OK);
+    }
 
     loadSettings();
     hlabelFont = CreateFontIndirect(&labelFont);
@@ -640,8 +643,19 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     kbdhook = SetWindowsHookEx(WH_KEYBOARD_LL, LLKeyboardProc, hThisInst, NULL);
 
     while( GetMessage(&msg, NULL, 0, 0) )    {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
+        if (msg.message == WM_HOTKEY) {
+            if(kbdhook) {
+                showText(L"\u263b - KeyCastOW OFF", TRUE);
+                UnhookWindowsHookEx(kbdhook);
+                kbdhook = NULL;
+            } else {
+                showText(L"\u263b - KeyCastOW ON", TRUE);
+                kbdhook = SetWindowsHookEx(WH_KEYBOARD_LL, LLKeyboardProc, hInstance, NULL);
+            }
+        } else {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
     }
 
     UnhookWindowsHookEx(kbdhook);
