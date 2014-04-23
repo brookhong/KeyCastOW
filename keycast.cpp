@@ -19,19 +19,19 @@ CTimer strokeTimer;
 struct KeyLabel{
     RECT rect;
     WCHAR text[MAXCHARSINLINE];
-    unsigned int time;
+    DWORD time;
 };
 
-unsigned int keyStrokeDelay = 500;
-unsigned int lingerTime = 1200;
-unsigned int fadeDuration = 600;
-unsigned int labelSpacing = 30;
+DWORD keyStrokeDelay = 500;
+DWORD lingerTime = 1200;
+DWORD fadeDuration = 600;
+DWORD labelSpacing = 30;
 COLORREF textColor = RGB(0,240, 33);
 COLORREF bgColor = RGB(0x7f,0,0x8f);
 LOGFONT labelFont;
-float opacity = 0.78f;
+DWORD opacity = 198;
 
-unsigned int labelCount = 10;
+DWORD labelCount = 10;
 KeyLabel keyLabels[10];
 
 #include "keycast.h"
@@ -122,13 +122,13 @@ void drawLabels(HDC hdc) {
     SetTextColor(hdc, textColor);
     SetBkMode (hdc, TRANSPARENT);
     HFONT hFontOld = (HFONT)SelectObject(hdc, hlabelFont);
-    for(unsigned int i = 0; i < labelCount; i ++) {
+    for(DWORD i = 0; i < labelCount; i ++) {
         DrawAlphaBlend(hdc, i);
     }
 }
 
 static void startFade() {
-    unsigned int i = 0;
+    DWORD i = 0;
     for(i = 0; i < labelCount; i++) {
         if(keyLabels[i].time > fadeDuration) {
             keyLabels[i].time -= 100;
@@ -143,12 +143,34 @@ static bool newStroke = true;
 static void startNewStroke() {
     newStroke = true;
 }
-
-void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
+void updateRegion(int lbl) {
     HRGN hRgnLabel;
     HRGN hRegion = CreateRectRgn(0,0,0,0);
+    if(lbl == labelCount) {
+        DWORD i;
+        for(i = 0; i < labelCount; i ++) {
+            if(keyLabels[i].time > 0 && keyLabels[i].rect.right > 0) {
+                hRgnLabel = CreateRoundRectRgn (keyLabels[i].rect.left, keyLabels[i].rect.top, keyLabels[i].rect.right, keyLabels[i].rect.bottom, 15, 15);
+                CombineRgn(hRegion, hRegion, hRgnLabel, RGN_OR);
+                DeleteObject(hRgnLabel);
+            }
+        }
+        SetWindowRgn(hMainWnd, hRegion, TRUE);
+        InvalidateRect(hMainWnd, NULL, TRUE);
+    } else {
+        if(keyLabels[lbl].time > 0 && keyLabels[lbl].rect.right > 0) {
+            hRgnLabel = CreateRoundRectRgn (keyLabels[lbl].rect.left, keyLabels[lbl].rect.top, keyLabels[lbl].rect.right, keyLabels[lbl].rect.bottom, 15, 15);
+            GetWindowRgn(hMainWnd, hRegion);
+            CombineRgn(hRegion, hRegion, hRgnLabel, RGN_OR);
+            DeleteObject(hRgnLabel);
+        }
+        SetWindowRgn(hMainWnd, hRegion, TRUE);
+        InvalidateRect(hMainWnd, &keyLabels[lbl].rect, TRUE);
+    }
+}
+void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
     if(newStroke || forceNewStroke || wcslen(keyLabels[labelCount-1].text) > VISIBLECHARS-1) {
-        unsigned int i;
+        DWORD i;
         for (i = 1; i < labelCount; i++) {
             if(keyLabels[i].time > 0) {
                 break;
@@ -163,14 +185,7 @@ void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
         keyLabels[labelCount-1].time = lingerTime+fadeDuration;
         updateLabel(labelCount-1);
 
-        for(i = 0; i < labelCount; i ++) {
-            hRgnLabel = CreateRoundRectRgn (keyLabels[i].rect.left, keyLabels[i].rect.top, keyLabels[i].rect.right, keyLabels[i].rect.bottom, 15, 15);
-            CombineRgn(hRegion, hRegion, hRgnLabel, RGN_OR);
-            DeleteObject(hRgnLabel);
-        }
-        SetWindowRgn(hMainWnd, hRegion, TRUE);
-        InvalidateRect(hMainWnd, NULL, TRUE);
-
+        updateRegion(labelCount);
         newStroke = false;
         strokeTimer.Start(keyStrokeDelay, false, true);
     } else {
@@ -180,15 +195,8 @@ void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
         swprintf(keyLabels[labelCount-1].text, MAXCHARSINLINE, L"%s%s", tmp, text);
         strokeTimer.Stop();
         strokeTimer.Start(keyStrokeDelay, false, true);
-
         updateLabel(labelCount-1);
-        hRgnLabel = CreateRoundRectRgn (keyLabels[labelCount-1].rect.left, keyLabels[labelCount-1].rect.top, keyLabels[labelCount-1].rect.right, keyLabels[labelCount-1].rect.bottom, 15, 15);
-        hRegion = CreateRectRgn(0,0,0,0);
-        GetWindowRgn(hMainWnd, hRegion);
-        CombineRgn(hRegion, hRegion, hRgnLabel, RGN_OR);
-        DeleteObject(hRgnLabel);
-        SetWindowRgn(hMainWnd, hRegion, TRUE);
-        InvalidateRect(hMainWnd, &keyLabels[labelCount-1].rect, TRUE);
+        updateRegion(labelCount-1);
     }
 }
 
@@ -231,7 +239,7 @@ BOOL ColorDialog ( HWND hWnd, COLORREF &clr ) {
 void updateMainWindow() {
     HBRUSH brush = CreateSolidBrush(bgColor);
     SetClassLongPtr(hMainWnd, GCLP_HBRBACKGROUND, (LONG)brush);
-    SetLayeredWindowAttributes(hMainWnd, 0, (BYTE)255*opacity, LWA_ALPHA);
+    SetLayeredWindowAttributes(hMainWnd, 0, (BYTE)opacity, LWA_ALPHA);
 
     HFONT hFontOld = (HFONT)SelectObject(hdcBuffer, hlabelFont);
     RECT box = {};
@@ -243,10 +251,17 @@ void updateMainWindow() {
     SetWindowPos(hMainWnd, HWND_TOPMOST, desktopRect.right - maxWidth, desktopRect.bottom - maxHeight, maxWidth, maxHeight, 0);
     UpdateWindow(hMainWnd);
 
-    for(unsigned int i = 0; i < labelCount; i ++) {
+    for(DWORD i = 0; i < labelCount; i ++) {
         keyLabels[i].rect.top = (box.bottom+4)*i+labelSpacing*i;
         keyLabels[i].rect.bottom = (box.bottom+4)*(i+1)+labelSpacing*i;
+        if(keyLabels[i].time > lingerTime+fadeDuration) {
+            keyLabels[i].time = lingerTime+fadeDuration;
+        }
+        if(keyLabels[i].time > 0) {
+            updateLabel(i);
+        }
     }
+    updateRegion(labelCount);
 }
 void initSettings() {
     keyStrokeDelay = 500;
@@ -255,10 +270,10 @@ void initSettings() {
     labelSpacing = 30;
     textColor = RGB(0,240, 33);
     bgColor = RGB(0x7f,0,0x8f);
-    opacity = 0.78f;
+    opacity = 198;
     memset(&labelFont, 0, sizeof(labelFont));
     labelFont.lfCharSet = DEFAULT_CHARSET;
-    labelFont.lfHeight = -36;
+    labelFont.lfHeight = -37;
     labelFont.lfPitchAndFamily = DEFAULT_PITCH;
     labelFont.lfWeight  = FW_NORMAL;
     labelFont.lfOutPrecision = OUT_DEFAULT_PRECIS;
@@ -267,14 +282,13 @@ void initSettings() {
     wcscpy_s(labelFont.lfFaceName, sizeof(labelFont.lfFaceName), TEXT("Arial"));
 }
 BOOL saveSettings() {
-    WCHAR tmp[256];
     BOOL res = TRUE;
 
     HKEY hRootKey, hChildKey;
     if(RegOpenCurrentUser(KEY_WRITE, &hRootKey) != ERROR_SUCCESS)
         return FALSE;
 
-    if(RegCreateKeyEx(hRootKey, L"Software\\keycastow", 0, NULL, REG_OPTION_NON_VOLATILE, KEY_READ | KEY_WRITE, NULL, &hChildKey, NULL) != ERROR_SUCCESS) {
+    if(RegCreateKeyEx(hRootKey, L"Software\\KeyCastOW", 0, NULL, REG_OPTION_NON_VOLATILE, KEY_READ | KEY_WRITE, NULL, &hChildKey, NULL) != ERROR_SUCCESS) {
         RegCloseKey(hRootKey);
         return FALSE;
     }
@@ -289,8 +303,7 @@ BOOL saveSettings() {
     RegSetKeyValue(hChildKey, NULL, L"bgColor", REG_DWORD, (LPCVOID)&bgColor, sizeof(bgColor));
     RegSetKeyValue(hChildKey, NULL, L"textColor", REG_DWORD, (LPCVOID)&textColor, sizeof(textColor));
     RegSetKeyValue(hChildKey, NULL, L"labelFont", REG_BINARY, (LPCVOID)&labelFont, sizeof(labelFont));
-    swprintf(tmp, 256, L"%f", opacity);
-    RegSetKeyValue(hChildKey, NULL, L"opacity", REG_EXPAND_SZ, (LPCVOID)tmp, sizeof(tmp));
+    RegSetKeyValue(hChildKey, NULL, L"opacity", REG_DWORD, (LPCVOID)&opacity, sizeof(opacity));
 
     RegCloseKey(hRootKey);
     RegCloseKey(hChildKey);
@@ -303,7 +316,7 @@ BOOL loadSettings() {
     initSettings();
     if(RegOpenCurrentUser(KEY_WRITE | KEY_READ, &hRootKey) != ERROR_SUCCESS)
         return FALSE;
-    if(RegCreateKeyEx(hRootKey, TEXT("SOFTWARE\\keycastow"), 0, NULL, REG_OPTION_NON_VOLATILE, KEY_READ | KEY_WRITE,
+    if(RegCreateKeyEx(hRootKey, TEXT("SOFTWARE\\KeyCastOW"), 0, NULL, REG_OPTION_NON_VOLATILE, KEY_READ | KEY_WRITE,
                 NULL, &hChildKey, &disposition) != ERROR_SUCCESS) {
         RegCloseKey(hRootKey);
         return FALSE;
@@ -317,11 +330,7 @@ BOOL loadSettings() {
         RegGetValue(hChildKey, NULL, L"labelSpacing", RRF_RT_DWORD, NULL, &labelSpacing, &size);
         RegGetValue(hChildKey, NULL, L"bgColor", RRF_RT_DWORD, NULL, &bgColor, &size);
         RegGetValue(hChildKey, NULL, L"textColor", RRF_RT_DWORD, NULL, &textColor, &size);
-
-        WCHAR tmp[256];
-        size = sizeof(tmp);
-        RegGetValue(hChildKey, NULL, L"opacity", RRF_RT_REG_EXPAND_SZ, NULL, tmp, &size);
-        opacity = (float)_wtof(tmp);
+        RegGetValue(hChildKey, NULL, L"opacity", RRF_RT_DWORD, NULL, &opacity, &size);
 
         size = sizeof(labelFont);
         RegGetValue(hChildKey, NULL, L"labelFont", RRF_RT_REG_BINARY, NULL, &labelFont, &size);
@@ -347,7 +356,7 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
             SetDlgItemText(hwndDlg, IDC_FADEDURATION, tmp);
             swprintf(tmp, 256, L"%d", labelSpacing);
             SetDlgItemText(hwndDlg, IDC_LABELSPACING, tmp);
-            swprintf(tmp, 256, L"%f", opacity);
+            swprintf(tmp, 256, L"%d", opacity);
             SetDlgItemText(hwndDlg, IDC_OPACITY, tmp);
             return TRUE;
         case WM_NOTIFY:
@@ -388,14 +397,28 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                         cf.nSizeMax       = 0 ;
 
                         if(ChooseFont (&cf)) {
+                            DeleteObject(hlabelFont);
                             hlabelFont = CreateFontIndirect(&labelFont);
+                            updateMainWindow();
+                            InvalidateRect(hMainWnd, NULL, TRUE);
+                            saveSettings();
                         }
                     }
                     return TRUE;
                 case IDC_TEXTCOLOR:
-                    return ColorDialog(hwndDlg, textColor);
+                    if( ColorDialog(hwndDlg, textColor) ) {
+                        updateMainWindow();
+                        InvalidateRect(hMainWnd, NULL, TRUE);
+                        saveSettings();
+                    }
+                    return TRUE;
                 case IDC_BGCOLOR:
-                    return ColorDialog(hwndDlg, bgColor);
+                    if( ColorDialog(hwndDlg, bgColor) ) {
+                        updateMainWindow();
+                        InvalidateRect(hMainWnd, NULL, TRUE);
+                        saveSettings();
+                    }
+                    return TRUE;
                 case IDOK:
                     GetDlgItemText(hwndDlg, IDC_KEYSTROKEDELAY, tmp, 256);
                     keyStrokeDelay = _wtoi(tmp);
@@ -406,10 +429,11 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     GetDlgItemText(hwndDlg, IDC_LABELSPACING, tmp, 256);
                     labelSpacing = _wtoi(tmp);
                     GetDlgItemText(hwndDlg, IDC_OPACITY, tmp, 256);
-                    opacity = (float)_wtof(tmp);
+                    opacity = _wtoi(tmp);
                     updateMainWindow();
                     InvalidateRect(hMainWnd, NULL, TRUE);
                     saveSettings();
+                    return TRUE;
                 case IDCANCEL:
                     EndDialog(hwndDlg, wParam);
                     return TRUE;
@@ -491,6 +515,8 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
                     case MENU_RESTORE:
                         initSettings();
                         saveSettings();
+                        DeleteObject(hlabelFont);
+                        hlabelFont = CreateFontIndirect(&labelFont);
                         updateMainWindow();
                         InvalidateRect(hMainWnd, NULL, TRUE);
                         break;
@@ -602,7 +628,7 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     hdcBuffer = CreateCompatibleDC(hdc);
     ReleaseDC(hMainWnd, hdc);
 
-    for(unsigned int i = 0; i < labelCount; i ++) {
+    for(DWORD i = 0; i < labelCount; i ++) {
         keyLabels[i].time = 0;
         keyLabels[i].rect.left = 0;
         keyLabels[i].rect.right = 0;
