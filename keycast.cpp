@@ -32,6 +32,7 @@ LOGFONT labelFont;
 DWORD opacity = 198;
 UINT tcModifiers = MOD_ALT;
 UINT tcKey = 0x42;      // 0x42 is 'b'
+DWORD cornerDia = 16;
 
 DWORD labelCount = 10;
 KeyLabel keyLabels[10];
@@ -98,7 +99,7 @@ void DrawAlphaBlend (HDC hdcwnd, int i)
     if(keyLabels[i].time == 0 && keyLabels[i].rect.right) {
         // remove the region for this label
         HRGN hRegion = CreateRectRgn(0,0,0,0);
-        HRGN hRgnLabel = CreateRoundRectRgn (keyLabels[i].rect.left, keyLabels[i].rect.top, keyLabels[i].rect.right, keyLabels[i].rect.bottom, 15, 15);
+        HRGN hRgnLabel = CreateRoundRectRgn (keyLabels[i].rect.left, keyLabels[i].rect.top, keyLabels[i].rect.right, keyLabels[i].rect.bottom, cornerDia, cornerDia);
         GetWindowRgn(hMainWnd, hRegion);
         CombineRgn(hRegion, hRegion, hRgnLabel, RGN_XOR);
         DeleteObject(hRgnLabel);
@@ -152,7 +153,7 @@ void updateRegion(int lbl) {
         DWORD i;
         for(i = 0; i < labelCount; i ++) {
             if(keyLabels[i].time > 0 && keyLabels[i].rect.right > 0) {
-                hRgnLabel = CreateRoundRectRgn (keyLabels[i].rect.left, keyLabels[i].rect.top, keyLabels[i].rect.right, keyLabels[i].rect.bottom, 15, 15);
+                hRgnLabel = CreateRoundRectRgn (keyLabels[i].rect.left, keyLabels[i].rect.top, keyLabels[i].rect.right, keyLabels[i].rect.bottom, cornerDia, cornerDia);
                 CombineRgn(hRegion, hRegion, hRgnLabel, RGN_OR);
                 DeleteObject(hRgnLabel);
             }
@@ -161,7 +162,7 @@ void updateRegion(int lbl) {
         InvalidateRect(hMainWnd, NULL, TRUE);
     } else {
         if(keyLabels[lbl].time > 0 && keyLabels[lbl].rect.right > 0) {
-            hRgnLabel = CreateRoundRectRgn (keyLabels[lbl].rect.left, keyLabels[lbl].rect.top, keyLabels[lbl].rect.right, keyLabels[lbl].rect.bottom, 15, 15);
+            hRgnLabel = CreateRoundRectRgn (keyLabels[lbl].rect.left, keyLabels[lbl].rect.top, keyLabels[lbl].rect.right, keyLabels[lbl].rect.bottom, cornerDia, cornerDia);
             GetWindowRgn(hMainWnd, hRegion);
             CombineRgn(hRegion, hRegion, hRgnLabel, RGN_OR);
             DeleteObject(hRgnLabel);
@@ -464,10 +465,12 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                         tcModifiers |= MOD_WIN;
                     }
                     GetDlgItemText(hwndDlg, IDC_TCKEY, tmp, 256);
-                    tcKey = VkKeyScanEx(tmp[0], GetKeyboardLayout(0));
-                    UnregisterHotKey(NULL, 1);
-                    if (!RegisterHotKey( NULL, 1, tcModifiers | MOD_NOREPEAT, tcKey)) {
-                        MessageBox(NULL, L"Unable to register hotkey, you probably need go to settings to redefine your hotkey for toggle capturing.", L"Warning", MB_OK|MB_ICONWARNING);
+                    if(tcModifiers != 0 && tmp[0] != '\0') {
+                        tcKey = VkKeyScanEx(tmp[0], GetKeyboardLayout(0));
+                        UnregisterHotKey(NULL, 1);
+                        if (!RegisterHotKey( NULL, 1, tcModifiers | MOD_NOREPEAT, tcKey)) {
+                            MessageBox(NULL, L"Unable to register hotkey, you probably need go to settings to redefine your hotkey for toggle capturing.", L"Warning", MB_OK|MB_ICONWARNING);
+                        }
                     }
                     updateMainWindow();
                     InvalidateRect(hMainWnd, NULL, TRUE);
