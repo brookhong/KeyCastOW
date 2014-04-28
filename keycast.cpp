@@ -8,6 +8,8 @@
 #include <windows.h>
 #include <Commctrl.h>
 #include <stdio.h>
+#include <gdiplus.h>
+using namespace Gdiplus;
 
 #include "resource.h"
 #include "timer.h"
@@ -32,7 +34,7 @@ LOGFONT labelFont;
 DWORD opacity = 198;
 UINT tcModifiers = MOD_ALT;
 UINT tcKey = 0x42;      // 0x42 is 'b'
-DWORD cornerDia = 32;
+int cornerDia = 32;
 
 DWORD labelCount = 10;
 KeyLabel keyLabels[10];
@@ -44,6 +46,8 @@ WCHAR *szWinName = L"KeyCastOW";
 HWND hMainWnd;
 HINSTANCE hInstance;
 HDC hdcBuffer;
+Pen* pen;
+SolidBrush* brush;
 
 #define IDI_TRAY       100
 #define WM_TRAYMSG     101
@@ -85,7 +89,17 @@ void DrawAlphaBlend (HDC hdcwnd, int i)
     FillMemory(pvBits, bmi.bmiHeader.biSizeImage, 0xff);
     SelectObject(hdcBuffer, hbitmap);
 
-    RoundRect(hdcBuffer, 0, 0, ulBitmapWidth, ulBitmapHeight, cornerDia, cornerDia);
+    Rect rc = {0, 0, (int)ulBitmapWidth-2, (int)ulBitmapHeight-2};
+    Graphics* g = Graphics::FromHDC(hdcBuffer);
+    g->SetSmoothingMode(SmoothingModeAntiAlias);
+    GraphicsPath path;
+    path.AddArc(rc.X, rc.Y, cornerDia, cornerDia, 180, 90);
+    path.AddArc(rc.X + rc.Width - cornerDia, rc.Y, cornerDia, cornerDia, 270, 90);
+    path.AddArc(rc.X + rc.Width - cornerDia, rc.Y + rc.Height - cornerDia, cornerDia, cornerDia, 0, 90);
+    path.AddArc(rc.X, rc.Y + rc.Height - cornerDia, cornerDia, cornerDia, 90, 90);
+    path.AddLine(rc.X, rc.Y + rc.Height - cornerDia, rc.X, rc.Y + cornerDia/2);
+    //g->DrawPath(pen, &path);
+    g->FillPath(brush, &path);
     TextOut(hdcBuffer, 8, 1, keyLabels[i].text, wcslen(keyLabels[i].text));
 
     bf.BlendOp = AC_SRC_OVER;
@@ -194,12 +208,17 @@ BOOL ColorDialog ( HWND hWnd, COLORREF &clr ) {
 void updateMainWindow() {
     SetLayeredWindowAttributes(hMainWnd, RGB(255,255,255), (BYTE)opacity, LWA_COLORKEY | LWA_ALPHA);
 
+    pen = new Pen(Color::Color(0x7f,0,0x8f), 0);
+    //brush = new SolidBrush(Color::Color(bgColor));
+    brush = new SolidBrush(Color::Color(0x7f,0,0x8f));
+
     HPEN pen = CreatePen(PS_NULL, 5, textColor);
     HPEN hPenOld = (HPEN)SelectObject(hdcBuffer, pen);
     DeleteObject(hPenOld);
     HBRUSH brush = CreateSolidBrush(bgColor);
     HBRUSH hBrushOld = (HBRUSH)SelectObject(hdcBuffer, brush);
     DeleteObject(hBrushOld);
+
     HFONT hlabelFont = CreateFontIndirect(&labelFont);
     HFONT hFontOld = (HFONT)SelectObject(hdcBuffer, hlabelFont);
     DeleteObject(hFontOld);
@@ -574,6 +593,9 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     WNDCLASSEX wcl;
     MSG        msg;
 
+    ULONG_PTR gdiplusStartupToken;
+    Gdiplus::GdiplusStartupInput gdiInput;
+    Gdiplus::GdiplusStartup(&gdiplusStartupToken,&gdiInput,NULL);
     hInstance = hThisInst;
 
     wcl.cbSize = sizeof(WNDCLASSEX);
@@ -658,5 +680,6 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
 
     UnhookWindowsHookEx(kbdhook);
     UnregisterHotKey(NULL, 1);
+    Gdiplus::GdiplusShutdown(gdiplusStartupToken);
     return msg.wParam;
 }
