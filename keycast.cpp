@@ -32,7 +32,7 @@ LOGFONT labelFont;
 DWORD opacity = 198;
 UINT tcModifiers = MOD_ALT;
 UINT tcKey = 0x42;      // 0x42 is 'b'
-DWORD cornerDia = 16;
+DWORD cornerDia = 32;
 
 DWORD labelCount = 10;
 KeyLabel keyLabels[10];
@@ -42,7 +42,6 @@ KeyLabel keyLabels[10];
 
 WCHAR *szWinName = L"KeyCastOW";
 HWND hMainWnd;
-HFONT hlabelFont;
 HINSTANCE hInstance;
 HDC hdcBuffer;
 
@@ -86,7 +85,7 @@ void DrawAlphaBlend (HDC hdcwnd, int i)
     FillMemory(pvBits, bmi.bmiHeader.biSizeImage, 0xff);
     SelectObject(hdcBuffer, hbitmap);
 
-    RoundRect(hdcBuffer, 0, 0, ulBitmapWidth, ulBitmapHeight, 20, 20);
+    RoundRect(hdcBuffer, 0, 0, ulBitmapWidth, ulBitmapHeight, cornerDia, cornerDia);
     TextOut(hdcBuffer, 8, 1, keyLabels[i].text, wcslen(keyLabels[i].text));
 
     bf.BlendOp = AC_SRC_OVER;
@@ -106,11 +105,6 @@ void updateLabel(int i) {
     RECT box = {};
     DrawText(hdcBuffer, keyLabels[i].text, wcslen(keyLabels[i].text), &box, DT_CALCRECT);
     keyLabels[i].rect.right = box.right+18;
-}
-void drawLabels(HDC hdc) {
-    for(DWORD i = 0; i < labelCount; i ++) {
-        DrawAlphaBlend(hdc, i);
-    }
 }
 
 static void startFade() {
@@ -198,13 +192,19 @@ BOOL ColorDialog ( HWND hWnd, COLORREF &clr ) {
 }
 
 void updateMainWindow() {
-    SetLayeredWindowAttributes(hMainWnd, RGB(255,255,255), 198, LWA_COLORKEY | LWA_ALPHA);
+    SetLayeredWindowAttributes(hMainWnd, RGB(255,255,255), (BYTE)opacity, LWA_COLORKEY | LWA_ALPHA);
 
+    HPEN pen = CreatePen(PS_NULL, 5, textColor);
+    HPEN hPenOld = (HPEN)SelectObject(hdcBuffer, pen);
+    DeleteObject(hPenOld);
     HBRUSH brush = CreateSolidBrush(bgColor);
     HBRUSH hBrushOld = (HBRUSH)SelectObject(hdcBuffer, brush);
+    DeleteObject(hBrushOld);
+    HFONT hlabelFont = CreateFontIndirect(&labelFont);
+    HFONT hFontOld = (HFONT)SelectObject(hdcBuffer, hlabelFont);
+    DeleteObject(hFontOld);
     SetTextColor(hdcBuffer, textColor);
     SetBkMode (hdcBuffer, TRANSPARENT);
-    HFONT hFontOld = (HFONT)SelectObject(hdcBuffer, hlabelFont);
 
     RECT box = {};
     DrawText(hdcBuffer, L"A", 1, &box, DT_CALCRECT);
@@ -378,8 +378,6 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                         cf.nSizeMax       = 0 ;
 
                         if(ChooseFont (&cf)) {
-                            DeleteObject(hlabelFont);
-                            hlabelFont = CreateFontIndirect(&labelFont);
                             updateMainWindow();
                             InvalidateRect(hMainWnd, NULL, TRUE);
                             saveSettings();
@@ -448,15 +446,20 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
     static HMENU hPopMenu;
     static NOTIFYICONDATA nid;
 
-    PAINTSTRUCT ps;
-    HDC hdc;
 
     switch(message)
     {
         case WM_PAINT:
-            hdc = BeginPaint(hWnd, &ps);
-            drawLabels(hdc);
-            EndPaint(hWnd, &ps);
+            {
+                PAINTSTRUCT ps;
+                HDC hdc;
+                DWORD i;
+                hdc = BeginPaint(hWnd, &ps);
+                for(i = 0; i < labelCount; i ++) {
+                    DrawAlphaBlend(hdc, i);
+                }
+                EndPaint(hWnd, &ps);
+            }
             break;
 
         // trayicon
@@ -516,8 +519,6 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
                     case MENU_RESTORE:
                         initSettings();
                         saveSettings();
-                        DeleteObject(hlabelFont);
-                        hlabelFont = CreateFontIndirect(&labelFont);
                         updateMainWindow();
                         InvalidateRect(hMainWnd, NULL, TRUE);
                         break;
@@ -620,7 +621,6 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     if (!RegisterHotKey( NULL, 1, tcModifiers | MOD_NOREPEAT, tcKey)) {
         MessageBox(NULL, L"Unable to register hotkey, you probably need go to settings to redefine your hotkey for toggle capturing.", L"Warning", MB_OK|MB_ICONWARNING);
     }
-    hlabelFont = CreateFontIndirect(&labelFont);
 
     HDC hdc = GetDC(hMainWnd);
     hdcBuffer = CreateCompatibleDC(hdc);
