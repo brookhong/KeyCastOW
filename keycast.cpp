@@ -1,13 +1,29 @@
 // Copyright © 2014 Brook Hong. All Rights Reserved.
 //
 
-// msbuild /p:platform=win32 /p:Configuration=Release
+// k.vim#cmd msbuild /p:platform=win32 /p:Configuration=Release && .\Release\keycastow.exe
 // msbuild keycastow.vcxproj /t:Clean
 // rc keycastow.rc && cl -DUNICODE -D_UNICODE keycast.cpp keylog.cpp keycastow.res user32.lib shell32.lib gdi32.lib Comdlg32.lib comctl32.lib
 
 #include <windows.h>
+#include <windowsx.h>
 #include <Commctrl.h>
 #include <stdio.h>
+
+#include <d2d1.h>
+template<class Interface> inline void SafeRelease( Interface **ppInterfaceToRelease) {
+    if (*ppInterfaceToRelease != NULL)
+    {
+        (*ppInterfaceToRelease)->Release();
+
+        (*ppInterfaceToRelease) = NULL;
+    }
+}
+ID2D1Factory *pD2DFactory = NULL;
+ID2D1DCRenderTarget *pDCRT = NULL;
+ID2D1SolidColorBrush *pBrush = NULL;
+ID2D1SolidColorBrush *pPen = NULL;
+FLOAT dpiX, dpiY;
 
 #include "resource.h"
 #include "timer.h"
@@ -35,6 +51,7 @@ DWORD opacity = 198;
 UINT tcModifiers = MOD_ALT;
 UINT tcKey = 0x42;      // 0x42 is 'b'
 DWORD cornerSize = 32;
+DWORD renderType = 0;
 
 DWORD labelCount = 10;
 KeyLabel keyLabels[10];
@@ -54,10 +71,6 @@ HDC hdcBuffer;
 #define MENU_RESTORE      34
 void DrawAlphaBlend (HDC hdcwnd, int i)
 {
-    BLENDFUNCTION bf;      // structure for alpha blending
-    HBITMAP hbitmap;       // bitmap handle
-    BITMAPINFO bmi;        // bitmap header
-    VOID *pvBits;          // pointer to DIB section
     ULONG   ulBitmapWidth, ulBitmapHeight;      // window width/height
     RECT &rt = keyLabels[i].rect;
 
@@ -69,27 +82,29 @@ void DrawAlphaBlend (HDC hdcwnd, int i)
     if ((!ulBitmapWidth) || (!ulBitmapHeight))
         return;
 
-    // zero the memory for the bitmap info
-    ZeroMemory(&bmi, sizeof(BITMAPINFO));
+    HBITMAP hbitmap = CreateCompatibleBitmap(hdcwnd, ulBitmapWidth, ulBitmapHeight);
+    HBITMAP hBitmapOld = SelectBitmap(hdcBuffer, hbitmap);
 
-    // setup bitmap info
-    // set the bitmap width and height to 60% of the width and height of each of the three horizontal areas. Later on, the blending will occur in the center of each of the three areas.
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = ulBitmapWidth;
-    bmi.bmiHeader.biHeight = ulBitmapHeight;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;         // four 8-bit components
-    bmi.bmiHeader.biCompression = BI_RGB;
-    bmi.bmiHeader.biSizeImage = ulBitmapWidth * ulBitmapHeight * 4;
-
-    // create our DIB section and select the bitmap into the dc
-    hbitmap = CreateDIBSection(hdcBuffer, &bmi, DIB_RGB_COLORS, &pvBits, NULL, 0x0);
-    FillMemory(pvBits, bmi.bmiHeader.biSizeImage, 0xff);
-    SelectObject(hdcBuffer, hbitmap);
-
-    RoundRect(hdcBuffer, borderSize, borderSize, ulBitmapWidth-borderSize, ulBitmapHeight-borderSize, cornerSize, cornerSize);
+    RECT rc = {0, 0, ulBitmapWidth, ulBitmapHeight};
+    if(renderType) {
+        FillRect(hdcBuffer, &rc, (HBRUSH)GetStockObject(WHITE_BRUSH));
+        RoundRect(hdcBuffer, borderSize, borderSize, ulBitmapWidth-borderSize, ulBitmapHeight-borderSize, cornerSize, cornerSize);
+    } else {
+        pDCRT->BindDC(hdcBuffer, &rc);
+        pDCRT->SetTransform(D2D1::Matrix3x2F::Identity());
+        D2D1_ROUNDED_RECT roundedRect = D2D1::RoundedRect(
+                D2D1::RectF(borderSize*dpiX, borderSize*dpiY, (ulBitmapWidth-borderSize)*dpiX, (ulBitmapHeight-borderSize)*dpiY),
+                cornerSize*dpiX,
+                cornerSize*dpiY);
+        pDCRT->BeginDraw();
+        pDCRT->Clear(D2D1::ColorF( 0xffffff, 1.0f ));
+        pDCRT->FillRoundedRectangle(roundedRect, pBrush);
+        pDCRT->DrawRoundedRectangle(roundedRect, pPen, borderSize*1.f);
+        pDCRT->EndDraw();
+    }
     TextOut(hdcBuffer, 8+borderSize, 1+borderSize, keyLabels[i].text, wcslen(keyLabels[i].text));
 
+    BLENDFUNCTION bf;      // structure for alpha blending
     bf.BlendOp = AC_SRC_OVER;
     bf.BlendFlags = 0;
     int alpha = (int)(255.0*keyLabels[i].time/fadeDuration);
@@ -101,7 +116,7 @@ void DrawAlphaBlend (HDC hdcwnd, int i)
                 ulBitmapWidth, ulBitmapHeight,
                 hdcBuffer, 0, 0, ulBitmapWidth, ulBitmapHeight, bf);
 
-    DeleteObject(hbitmap);
+    DeleteObject(hBitmapOld);
 }
 void updateLabel(int i) {
     RECT box = {};
@@ -192,16 +207,25 @@ BOOL ColorDialog ( HWND hWnd, COLORREF &clr ) {
     }
     return TRUE;
 }
-
+#define BR(bgr) (bgr>>16|(bgr&0x0000ff00)|(bgr&0x000000ff)<<16)
 void updateMainWindow() {
     SetLayeredWindowAttributes(hMainWnd, RGB(255,255,255), (BYTE)opacity, LWA_COLORKEY | LWA_ALPHA);
 
+    if(pBrush) {
+        SafeRelease(&pBrush);
+    }
+    if(pPen) {
+        SafeRelease(&pPen);
+    }
+    pDCRT->CreateSolidColorBrush( D2D1::ColorF(BR(borderColor)), &pPen);
+    pDCRT->CreateSolidColorBrush( D2D1::ColorF(BR(bgColor)), &pBrush);
     HPEN pen = CreatePen(PS_SOLID, borderSize, borderColor);
     HPEN hPenOld = (HPEN)SelectObject(hdcBuffer, pen);
     DeleteObject(hPenOld);
     HBRUSH brush = CreateSolidBrush(bgColor);
     HBRUSH hBrushOld = (HBRUSH)SelectObject(hdcBuffer, brush);
     DeleteObject(hBrushOld);
+
     HFONT hlabelFont = CreateFontIndirect(&labelFont);
     HFONT hFontOld = (HFONT)SelectObject(hdcBuffer, hlabelFont);
     DeleteObject(hFontOld);
@@ -239,6 +263,7 @@ void initSettings() {
     borderColor = bgColor;
     borderSize = 1;
     cornerSize = 32;
+    renderType = 0;
     tcModifiers = MOD_ALT;
     tcKey = 0x42;
     memset(&labelFont, 0, sizeof(labelFont));
@@ -279,6 +304,7 @@ BOOL saveSettings() {
     RegSetKeyValue(hChildKey, NULL, L"borderColor", REG_DWORD, (LPCVOID)&borderColor, sizeof(borderColor));
     RegSetKeyValue(hChildKey, NULL, L"borderSize", REG_DWORD, (LPCVOID)&borderSize, sizeof(borderSize));
     RegSetKeyValue(hChildKey, NULL, L"cornerSize", REG_DWORD, (LPCVOID)&cornerSize, sizeof(cornerSize));
+    RegSetKeyValue(hChildKey, NULL, L"renderType", REG_DWORD, (LPCVOID)&renderType, sizeof(renderType));
 
     RegCloseKey(hRootKey);
     RegCloseKey(hChildKey);
@@ -311,6 +337,7 @@ BOOL loadSettings() {
         RegGetValue(hChildKey, NULL, L"borderColor", RRF_RT_DWORD, NULL, &borderColor, &size);
         RegGetValue(hChildKey, NULL, L"borderSize", RRF_RT_DWORD, NULL, &borderSize, &size);
         RegGetValue(hChildKey, NULL, L"cornerSize", RRF_RT_DWORD, NULL, &cornerSize, &size);
+        RegGetValue(hChildKey, NULL, L"renderType", RRF_RT_DWORD, NULL, &renderType, &size);
 
         size = sizeof(labelFont);
         RegGetValue(hChildKey, NULL, L"labelFont", RRF_RT_REG_BINARY, NULL, &labelFont, &size);
@@ -343,6 +370,9 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                 SetDlgItemText(hwndDlg, IDC_BORDERSIZE, tmp);
                 swprintf(tmp, 256, L"%d", cornerSize);
                 SetDlgItemText(hwndDlg, IDC_CORNERSIZE, tmp);
+                ComboBox_AddString(GetDlgItem(hwndDlg, IDC_RENDER), L"Direct2D");
+                ComboBox_AddString(GetDlgItem(hwndDlg, IDC_RENDER), L"GDI");
+                ComboBox_SetCurSel(GetDlgItem(hwndDlg, IDC_RENDER), renderType);
                 CheckDlgButton(hwndDlg, IDC_MODCTRL, (tcModifiers & MOD_CONTROL) ? BST_CHECKED : BST_UNCHECKED);
                 CheckDlgButton(hwndDlg, IDC_MODALT, (tcModifiers & MOD_ALT) ? BST_CHECKED : BST_UNCHECKED);
                 CheckDlgButton(hwndDlg, IDC_MODSHIFT, (tcModifiers & MOD_SHIFT) ? BST_CHECKED : BST_UNCHECKED);
@@ -435,6 +465,7 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     borderSize = _wtoi(tmp);
                     GetDlgItemText(hwndDlg, IDC_CORNERSIZE, tmp, 256);
                     cornerSize = _wtoi(tmp);
+                    renderType = ComboBox_GetCurSel(GetDlgItem(hwndDlg, IDC_RENDER));
                     tcModifiers = 0;
                     if(BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MODCTRL)) {
                         tcModifiers |= MOD_CONTROL;
@@ -602,6 +633,25 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
 
     hInstance = hThisInst;
 
+    if (SUCCEEDED(CoInitialize(NULL))) {
+        D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &pD2DFactory);
+        // Create a DC render target.
+        D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(
+                D2D1_RENDER_TARGET_TYPE_DEFAULT,
+                D2D1::PixelFormat(
+                    DXGI_FORMAT_B8G8R8A8_UNORM,
+                    D2D1_ALPHA_MODE_PREMULTIPLIED),
+                0,
+                0,
+                D2D1_RENDER_TARGET_USAGE_NONE,
+                D2D1_FEATURE_LEVEL_DEFAULT
+                );
+
+        pD2DFactory->GetDesktopDpi(&dpiX, &dpiY);
+        dpiX /= 96.f;
+        dpiY /= 96.f;
+        pD2DFactory->CreateDCRenderTarget(&props, &pDCRT);
+    }
     wcl.cbSize = sizeof(WNDCLASSEX);
     wcl.hInstance = hThisInst;
     wcl.lpszClassName = szWinName;
@@ -684,5 +734,13 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
 
     UnhookWindowsHookEx(kbdhook);
     UnregisterHotKey(NULL, 1);
+
+    if(pD2DFactory) {
+        SafeRelease(&pD2DFactory);
+        SafeRelease(&pDCRT);
+        SafeRelease(&pBrush);
+        SafeRelease(&pPen);
+        CoUninitialize();
+    }
     return msg.wParam;
 }
