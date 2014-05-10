@@ -53,8 +53,9 @@ UINT tcKey = 0x42;      // 0x42 is 'b'
 DWORD cornerSize = 32;
 DWORD renderType = 0;
 
-DWORD labelCount = 10;
-KeyLabel keyLabels[10];
+#define MAXLABELS 60
+KeyLabel keyLabels[MAXLABELS];
+DWORD labelCount = 0;
 
 #include "keycast.h"
 #include "keylog.h"
@@ -165,6 +166,7 @@ void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
             }
         }
         for (; i < labelCount; i++) {
+            eraseLabel(i-1);
             wcscpy_s(keyLabels[i-1].text, MAXCHARSINLINE, keyLabels[i].text);
             keyLabels[i-1].time = keyLabels[i].time;
             keyLabels[i-1].rect.right = keyLabels[i].rect.right;
@@ -251,20 +253,17 @@ void updateMainWindow() {
 
     RECT box = {};
     DrawText(hdcBuffer, L"A", 1, &box, DT_CALCRECT);
-    int maxHeight = (box.bottom+4+labelSpacing)*labelCount;
-    int maxWidth = box.right*(VISIBLECHARS+2)+18;
-    RECT desktopRect;
-    SystemParametersInfo(SPI_GETWORKAREA,NULL,&desktopRect,NULL);
-    SetWindowPos(hMainWnd, HWND_TOPMOST, desktopRect.right - maxWidth, desktopRect.bottom - maxHeight, maxWidth, maxHeight, 0);
-    UpdateWindow(hMainWnd);
+    RECT r;
+    GetWindowRect(hMainWnd, &r);
+    labelCount = (r.bottom - r.top) / (box.bottom+4+labelSpacing);
 
-    HDC hdc = GetDC(hMainWnd);
-    HBITMAP hbitmap = CreateCompatibleBitmap(hdc, maxHeight, maxHeight);
-    HBITMAP hBitmapOld = SelectBitmap(hdcBuffer, hbitmap);
-    ReleaseDC(hMainWnd, hdc);
-    DeleteObject(hBitmapOld);
+    if(labelCount > MAXLABELS)
+        labelCount = MAXLABELS;
 
     for(DWORD i = 0; i < labelCount; i ++) {
+        keyLabels[i].time = 0;
+        keyLabels[i].rect.left = 0;
+        keyLabels[i].rect.right = 0;
         keyLabels[i].rect.top = (box.bottom+4)*i+labelSpacing*i;
         keyLabels[i].rect.bottom = (box.bottom+4)*(i+1)+labelSpacing*i+borderSize*2;
         if(keyLabels[i].time > lingerTime+fadeDuration) {
@@ -721,15 +720,18 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         MessageBox(NULL, L"Unable to register hotkey, you probably need go to settings to redefine your hotkey for toggle capturing.", L"Warning", MB_OK|MB_ICONWARNING);
     }
 
+    RECT desktopRect;
+    SystemParametersInfo(SPI_GETWORKAREA,NULL,&desktopRect,NULL);
+    SetWindowPos(hMainWnd, HWND_TOPMOST, 0, 0, desktopRect.right, desktopRect.bottom, 0);
+    UpdateWindow(hMainWnd);
+
     HDC hdc = GetDC(hMainWnd);
     hdcBuffer = CreateCompatibleDC(hdc);
+    HBITMAP hbitmap = CreateCompatibleBitmap(hdc, desktopRect.right, desktopRect.bottom);
+    HBITMAP hBitmapOld = SelectBitmap(hdcBuffer, hbitmap);
     ReleaseDC(hMainWnd, hdc);
+    DeleteObject(hBitmapOld);
 
-    for(DWORD i = 0; i < labelCount; i ++) {
-        keyLabels[i].time = 0;
-        keyLabels[i].rect.left = 0;
-        keyLabels[i].rect.right = 0;
-    }
     updateMainWindow();
     ShowWindow(hMainWnd, SW_SHOW);
 
