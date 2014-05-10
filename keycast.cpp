@@ -82,28 +82,6 @@ void DrawAlphaBlend (HDC hdcwnd, int i)
     if ((!ulBitmapWidth) || (!ulBitmapHeight))
         return;
 
-    HBITMAP hbitmap = CreateCompatibleBitmap(hdcwnd, ulBitmapWidth, ulBitmapHeight);
-    HBITMAP hBitmapOld = SelectBitmap(hdcBuffer, hbitmap);
-
-    RECT rc = {0, 0, ulBitmapWidth, ulBitmapHeight};
-    if(renderType) {
-        FillRect(hdcBuffer, &rc, (HBRUSH)GetStockObject(WHITE_BRUSH));
-        RoundRect(hdcBuffer, borderSize, borderSize, ulBitmapWidth-borderSize, ulBitmapHeight-borderSize, cornerSize, cornerSize);
-    } else {
-        pDCRT->BindDC(hdcBuffer, &rc);
-        pDCRT->SetTransform(D2D1::Matrix3x2F::Identity());
-        D2D1_ROUNDED_RECT roundedRect = D2D1::RoundedRect(
-                D2D1::RectF(borderSize*dpiX, borderSize*dpiY, (ulBitmapWidth-borderSize)*dpiX, (ulBitmapHeight-borderSize)*dpiY),
-                cornerSize*dpiX,
-                cornerSize*dpiY);
-        pDCRT->BeginDraw();
-        pDCRT->Clear(D2D1::ColorF( 0xffffff, 1.0f ));
-        pDCRT->FillRoundedRectangle(roundedRect, pBrush);
-        pDCRT->DrawRoundedRectangle(roundedRect, pPen, borderSize*1.f);
-        pDCRT->EndDraw();
-    }
-    TextOut(hdcBuffer, 8+borderSize, 1+borderSize, keyLabels[i].text, wcslen(keyLabels[i].text));
-
     BLENDFUNCTION bf;      // structure for alpha blending
     bf.BlendOp = AC_SRC_OVER;
     bf.BlendFlags = 0;
@@ -114,14 +92,52 @@ void DrawAlphaBlend (HDC hdcwnd, int i)
 
     GdiAlphaBlend(hdcwnd, rt.left, rt.top,
                 ulBitmapWidth, ulBitmapHeight,
-                hdcBuffer, 0, 0, ulBitmapWidth, ulBitmapHeight, bf);
-
-    DeleteObject(hBitmapOld);
+                hdcBuffer, rt.left, rt.top, ulBitmapWidth, ulBitmapHeight, bf);
+}
+void eraseLabel(int i) {
+    RECT &rt = keyLabels[i].rect;
+    FillRect(hdcBuffer, &rt, (HBRUSH)GetStockObject(WHITE_BRUSH));
+    InvalidateRect(hMainWnd, &rt, TRUE);
 }
 void updateLabel(int i) {
+    // update change within hdcBuffer, then use InvalidateRect to trigger WM_PAINT
+    // where DrawAlphaBlend is called to update change within paint DC
+    eraseLabel(i);
+
     RECT box = {};
     DrawText(hdcBuffer, keyLabels[i].text, wcslen(keyLabels[i].text), &box, DT_CALCRECT);
     keyLabels[i].rect.right = box.right+18+borderSize*2;
+
+    ULONG   ulBitmapWidth, ulBitmapHeight;      // window width/height
+    RECT &rt = keyLabels[i].rect;
+
+    // calculate window width/height
+    ulBitmapWidth = rt.right - rt.left;
+    ulBitmapHeight = rt.bottom - rt.top;
+
+    if( ulBitmapWidth && ulBitmapHeight ) {
+        // make sure we have at least some window size
+        if(renderType) {
+            FillRect(hdcBuffer, &rt, (HBRUSH)GetStockObject(WHITE_BRUSH));
+            RoundRect(hdcBuffer, rt.left+borderSize, rt.top+borderSize, rt.left+ulBitmapWidth-borderSize, rt.top+ulBitmapHeight-borderSize, cornerSize, cornerSize);
+        } else {
+            pDCRT->BindDC(hdcBuffer, &rt);
+            pDCRT->SetTransform(D2D1::Matrix3x2F::Translation(rt.left+0.0f, rt.top+0.0f));
+            RECT rc = {0, 0, ulBitmapWidth, ulBitmapHeight};
+            pDCRT->SetTransform(D2D1::Matrix3x2F::Identity());
+            D2D1_ROUNDED_RECT roundedRect = D2D1::RoundedRect(
+                    D2D1::RectF(borderSize*dpiX, borderSize*dpiY, (ulBitmapWidth-borderSize)*dpiX, (ulBitmapHeight-borderSize)*dpiY),
+                    cornerSize*dpiX,
+                    cornerSize*dpiY);
+            pDCRT->BeginDraw();
+            pDCRT->Clear(D2D1::ColorF( 0xffffff, 1.0f ));
+            pDCRT->FillRoundedRectangle(roundedRect, pBrush);
+            pDCRT->DrawRoundedRectangle(roundedRect, pPen, borderSize*1.f);
+            pDCRT->EndDraw();
+        }
+        TextOut(hdcBuffer, rt.left+8+borderSize, rt.top+1+borderSize, keyLabels[i].text, wcslen(keyLabels[i].text));
+        InvalidateRect(hMainWnd, &rt, TRUE);
+    }
 }
 
 static void startFade() {
@@ -152,12 +168,13 @@ void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
             wcscpy_s(keyLabels[i-1].text, MAXCHARSINLINE, keyLabels[i].text);
             keyLabels[i-1].time = keyLabels[i].time;
             keyLabels[i-1].rect.right = keyLabels[i].rect.right;
+            updateLabel(i-1);
+            eraseLabel(i);
         }
         wcscpy_s(keyLabels[labelCount-1].text, MAXCHARSINLINE, text);
         keyLabels[labelCount-1].time = lingerTime+fadeDuration;
         updateLabel(labelCount-1);
 
-        InvalidateRect(hMainWnd, NULL, TRUE);
         newStroke = false;
         strokeTimer.Start(keyStrokeDelay, false, true);
     } else {
@@ -165,10 +182,10 @@ void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
         wcscpy_s(tmp, MAXCHARSINLINE, keyLabels[labelCount-1].text);
         keyLabels[labelCount-1].time = lingerTime+fadeDuration;
         swprintf(keyLabels[labelCount-1].text, MAXCHARSINLINE, L"%s%s", tmp, text);
+        updateLabel(labelCount-1);
+
         strokeTimer.Stop();
         strokeTimer.Start(keyStrokeDelay, false, true);
-        updateLabel(labelCount-1);
-        InvalidateRect(hMainWnd, &keyLabels[labelCount-1].rect, TRUE);
     }
 }
 
@@ -240,6 +257,12 @@ void updateMainWindow() {
     SystemParametersInfo(SPI_GETWORKAREA,NULL,&desktopRect,NULL);
     SetWindowPos(hMainWnd, HWND_TOPMOST, desktopRect.right - maxWidth, desktopRect.bottom - maxHeight, maxWidth, maxHeight, 0);
     UpdateWindow(hMainWnd);
+
+    HDC hdc = GetDC(hMainWnd);
+    HBITMAP hbitmap = CreateCompatibleBitmap(hdc, maxHeight, maxHeight);
+    HBITMAP hBitmapOld = SelectBitmap(hdcBuffer, hbitmap);
+    ReleaseDC(hMainWnd, hdc);
+    DeleteObject(hBitmapOld);
 
     for(DWORD i = 0; i < labelCount; i ++) {
         keyLabels[i].rect.top = (box.bottom+4)*i+labelSpacing*i;
