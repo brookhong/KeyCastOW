@@ -30,12 +30,19 @@ FLOAT dpiX, dpiY;
 CTimer showTimer;
 CTimer strokeTimer;
 
-#define MAXCHARSINLINE 64
-#define VISIBLECHARS 16
+#define MAXCHARS 4096
+WCHAR textBuffer[MAXCHARS];
+LPCWSTR textBufferEnd = textBuffer + MAXCHARS;
+
 struct KeyLabel{
     RECT rect;
-    WCHAR text[MAXCHARSINLINE];
+    WCHAR *text;
+    DWORD length;
     DWORD time;
+    KeyLabel() {
+        text = textBuffer;
+        length = 0;
+    }
 };
 
 DWORD keyStrokeDelay = 500;
@@ -56,6 +63,7 @@ DWORD renderType = 0;
 #define MAXLABELS 60
 KeyLabel keyLabels[MAXLABELS];
 DWORD labelCount = 0;
+RECT desktopRect;
 
 #include "keycast.h"
 #include "keylog.h"
@@ -106,7 +114,7 @@ void updateLabel(int i) {
     eraseLabel(i);
 
     RECT box = {};
-    DrawText(hdcBuffer, keyLabels[i].text, wcslen(keyLabels[i].text), &box, DT_CALCRECT);
+    DrawText(hdcBuffer, keyLabels[i].text, keyLabels[i].length, &box, DT_CALCRECT);
     keyLabels[i].rect.right = box.right+18+borderSize*2;
 
     ULONG   ulBitmapWidth, ulBitmapHeight;      // window width/height
@@ -136,7 +144,7 @@ void updateLabel(int i) {
             pDCRT->DrawRoundedRectangle(roundedRect, pPen, borderSize*1.f);
             pDCRT->EndDraw();
         }
-        TextOut(hdcBuffer, rt.left+8+borderSize, rt.top+1+borderSize, keyLabels[i].text, wcslen(keyLabels[i].text));
+        TextOut(hdcBuffer, rt.left+8+borderSize, rt.top+1+borderSize, keyLabels[i].text, keyLabels[i].length);
         InvalidateRect(hMainWnd, &rt, TRUE);
     }
 }
@@ -157,8 +165,23 @@ static bool newStroke = true;
 static void startNewStroke() {
     newStroke = true;
 }
+bool outOfLine(LPCWSTR text) {
+    RECT box = {};
+    size_t newLen = wcslen(text);
+    if(keyLabels[labelCount-1].text+keyLabels[labelCount-1].length+newLen >= textBufferEnd) {
+        wcscpy_s(textBuffer, MAXCHARS, keyLabels[labelCount-1].text);
+        keyLabels[labelCount-1].text = textBuffer;
+    }
+    LPWSTR tmp = keyLabels[labelCount-1].text + keyLabels[labelCount-1].length;
+    wcscpy_s(tmp, (textBufferEnd-tmp), text);
+    DrawText(hdcBuffer, keyLabels[labelCount-1].text, keyLabels[labelCount-1].length+newLen, &box, DT_CALCRECT);
+    RECT r;
+    GetWindowRect(hMainWnd,&r);
+    return (r.left+box.right+18+borderSize*2 >= (DWORD)desktopRect.right);
+}
 void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
-    if(newStroke || forceNewStroke || wcslen(keyLabels[labelCount-1].text) > VISIBLECHARS-1) {
+    size_t newLen = wcslen(text);
+    if(newStroke || forceNewStroke || outOfLine(text)) {
         DWORD i;
         for (i = 1; i < labelCount; i++) {
             if(keyLabels[i].time > 0) {
@@ -167,23 +190,36 @@ void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
         }
         for (; i < labelCount; i++) {
             eraseLabel(i-1);
-            wcscpy_s(keyLabels[i-1].text, MAXCHARSINLINE, keyLabels[i].text);
+            keyLabels[i-1].text = keyLabels[i].text;
+            keyLabels[i-1].length = keyLabels[i].length;
             keyLabels[i-1].time = keyLabels[i].time;
             keyLabels[i-1].rect.right = keyLabels[i].rect.right;
             updateLabel(i-1);
             eraseLabel(i);
         }
-        wcscpy_s(keyLabels[labelCount-1].text, MAXCHARSINLINE, text);
+        keyLabels[labelCount-1].text = keyLabels[labelCount-2].text + keyLabels[labelCount-2].length;
+        if(keyLabels[labelCount-1].text+newLen >= textBufferEnd) {
+            keyLabels[labelCount-1].text = textBuffer;
+        }
+        wcscpy_s(keyLabels[labelCount-1].text, textBufferEnd-keyLabels[labelCount-1].text, text);
+        keyLabels[labelCount-1].length = newLen;
+
         keyLabels[labelCount-1].time = lingerTime+fadeDuration;
         updateLabel(labelCount-1);
 
         newStroke = false;
         strokeTimer.Start(keyStrokeDelay, false, true);
     } else {
-        WCHAR tmp[MAXCHARSINLINE];
-        wcscpy_s(tmp, MAXCHARSINLINE, keyLabels[labelCount-1].text);
+        LPWSTR tmp = keyLabels[labelCount-1].text + keyLabels[labelCount-1].length;
+        if(tmp+newLen >= textBufferEnd) {
+            tmp = textBuffer;
+            keyLabels[labelCount-1].text = tmp;
+            keyLabels[labelCount-1].length = newLen;
+        } else {
+            keyLabels[labelCount-1].length += newLen;
+        }
+        wcscpy_s(tmp, (textBufferEnd-tmp), text);
         keyLabels[labelCount-1].time = lingerTime+fadeDuration;
-        swprintf(keyLabels[labelCount-1].text, MAXCHARSINLINE, L"%s%s", tmp, text);
         updateLabel(labelCount-1);
 
         strokeTimer.Stop();
@@ -253,9 +289,7 @@ void updateMainWindow() {
 
     RECT box = {};
     DrawText(hdcBuffer, L"A", 1, &box, DT_CALCRECT);
-    RECT r;
-    GetWindowRect(hMainWnd, &r);
-    labelCount = (r.bottom - r.top) / (box.bottom+4+labelSpacing);
+    labelCount = (desktopRect.bottom - desktopRect.top) / (box.bottom+4+labelSpacing) + 1;
 
     if(labelCount > MAXLABELS)
         labelCount = MAXLABELS;
@@ -401,9 +435,8 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                 CheckDlgButton(hwndDlg, IDC_MODWIN, (tcModifiers & MOD_WIN) ? BST_CHECKED : BST_UNCHECKED);
                 swprintf(tmp, 256, L"%c", MapVirtualKey(tcKey, MAPVK_VK_TO_CHAR));
                 SetDlgItemText(hwndDlg, IDC_TCKEY, tmp);
-                RECT desktopRect, r;
+                RECT r;
                 GetWindowRect(hwndDlg, &r);
-                SystemParametersInfo(SPI_GETWORKAREA,NULL,&desktopRect,NULL);
                 SetWindowPos(hwndDlg, 0, desktopRect.right - r.right + r.left, desktopRect.bottom - r.bottom + r.top, 0, 0, SWP_NOSIZE);
             }
             return TRUE;
@@ -720,9 +753,8 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         MessageBox(NULL, L"Unable to register hotkey, you probably need go to settings to redefine your hotkey for toggle capturing.", L"Warning", MB_OK|MB_ICONWARNING);
     }
 
-    RECT desktopRect;
     SystemParametersInfo(SPI_GETWORKAREA,NULL,&desktopRect,NULL);
-    SetWindowPos(hMainWnd, HWND_TOPMOST, 0, 0, desktopRect.right, desktopRect.bottom, 0);
+    SetWindowPos(hMainWnd, HWND_TOPMOST, desktopRect.right*4/5, 0, desktopRect.right, desktopRect.bottom, 0);
     UpdateWindow(hMainWnd);
 
     HDC hdc = GetDC(hMainWnd);
