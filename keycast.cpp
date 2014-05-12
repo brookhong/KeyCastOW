@@ -45,6 +45,10 @@ struct KeyLabel{
     }
 };
 
+#define BR(bgr) (bgr>>16|(bgr&0x0000ff00)|(bgr&0x000000ff)<<16)
+COLORREF clearColor = RGB(255,255,255);
+HBRUSH clearBrush = (HBRUSH)GetStockObject(WHITE_BRUSH);
+
 DWORD keyStrokeDelay = 500;
 DWORD lingerTime = 1200;
 DWORD fadeDuration = 600;
@@ -105,7 +109,7 @@ void DrawAlphaBlend (HDC hdcwnd, int i)
 }
 void eraseLabel(int i) {
     RECT &rt = keyLabels[i].rect;
-    FillRect(hdcBuffer, &rt, (HBRUSH)GetStockObject(WHITE_BRUSH));
+    FillRect(hdcBuffer, &rt, clearBrush);
     InvalidateRect(hMainWnd, &rt, TRUE);
 }
 void updateLabel(int i) {
@@ -127,7 +131,7 @@ void updateLabel(int i) {
     if( ulBitmapWidth && ulBitmapHeight ) {
         // make sure we have at least some window size
         if(renderType) {
-            FillRect(hdcBuffer, &rt, (HBRUSH)GetStockObject(WHITE_BRUSH));
+            FillRect(hdcBuffer, &rt, clearBrush);
             RoundRect(hdcBuffer, rt.left+borderSize, rt.top+borderSize, rt.left+ulBitmapWidth-borderSize, rt.top+ulBitmapHeight-borderSize, cornerSize, cornerSize);
         } else {
             pDCRT->BindDC(hdcBuffer, &rt);
@@ -139,7 +143,7 @@ void updateLabel(int i) {
                     cornerSize*dpiX,
                     cornerSize*dpiY);
             pDCRT->BeginDraw();
-            pDCRT->Clear(D2D1::ColorF( 0xffffff, 1.0f ));
+            pDCRT->Clear(D2D1::ColorF( BR(clearColor), 1.0f ));
             pDCRT->FillRoundedRectangle(roundedRect, pBrush);
             pDCRT->DrawRoundedRectangle(roundedRect, pPen, borderSize*1.f);
             pDCRT->EndDraw();
@@ -179,7 +183,27 @@ bool outOfLine(LPCWSTR text) {
     GetWindowRect(hMainWnd,&r);
     return (r.left+box.right+18+borderSize*2 >= (DWORD)desktopRect.right);
 }
+void updateClearColor() {
+    COLORREF cr;
+    HDC hdc = GetDC(NULL); // get the desktop device context
+    RECT r;
+    GetWindowRect(hMainWnd,&r);
+
+    cr = GetPixel(hdc, r.left, r.top+desktopRect.bottom/2);
+    ReleaseDC(NULL, hdc);
+
+    if( cr != clearColor) {
+        clearColor = cr;
+        HBRUSH cb = CreateSolidBrush(clearColor);
+        SetClassLongPtr(hMainWnd, GCLP_HBRBACKGROUND, (LONG)cb);
+        DeleteObject(clearBrush);
+        clearBrush = cb;
+        SetLayeredWindowAttributes(hMainWnd, clearColor, (BYTE)opacity, LWA_COLORKEY | LWA_ALPHA);
+        InvalidateRect(hMainWnd, NULL, TRUE);
+    }
+}
 void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
+    updateClearColor();
     size_t newLen = wcslen(text);
     if(newStroke || forceNewStroke || outOfLine(text)) {
         DWORD i;
@@ -262,9 +286,8 @@ BOOL ColorDialog ( HWND hWnd, COLORREF &clr ) {
     }
     return TRUE;
 }
-#define BR(bgr) (bgr>>16|(bgr&0x0000ff00)|(bgr&0x000000ff)<<16)
 void updateMainWindow() {
-    SetLayeredWindowAttributes(hMainWnd, RGB(255,255,255), (BYTE)opacity, LWA_COLORKEY | LWA_ALPHA);
+    SetLayeredWindowAttributes(hMainWnd, clearColor, (BYTE)opacity, LWA_COLORKEY | LWA_ALPHA);
 
     if(pBrush) {
         SafeRelease(&pBrush);
