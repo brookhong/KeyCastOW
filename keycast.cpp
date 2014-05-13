@@ -62,7 +62,7 @@ DWORD opacity = 198;
 UINT tcModifiers = MOD_ALT;
 UINT tcKey = 0x42;      // 0x42 is 'b'
 DWORD cornerSize = 32;
-DWORD renderType = 0;
+DWORD renderType = 0;   // 0 -- Direct2D, 1 -- GDI
 
 #define MAXLABELS 60
 KeyLabel keyLabels[MAXLABELS];
@@ -184,12 +184,21 @@ bool outOfLine(LPCWSTR text) {
     return (r.left+box.right+18+borderSize*2 >= (DWORD)desktopRect.right);
 }
 void updateClearColor() {
-    COLORREF cr;
+    COLORREF cr = clearColor;
     HDC hdc = GetDC(NULL); // get the desktop device context
     RECT r;
     GetWindowRect(hMainWnd,&r);
 
-    cr = GetPixel(hdc, r.left, r.top+desktopRect.bottom/2);
+    DWORD i;
+    int x, y;
+    for (i = labelCount-1; i > 0; i--) {
+        x = r.left+keyLabels[i].rect.left;
+        y = r.top+keyLabels[i].rect.top;
+        if(keyLabels[i].time == 0 && x > 0 && x < desktopRect.right && y > 0 && y < desktopRect.bottom) {
+            cr = GetPixel(hdc, x, y);
+            break;
+        }
+    }
     ReleaseDC(NULL, hdc);
 
     if( cr != clearColor) {
@@ -203,7 +212,9 @@ void updateClearColor() {
     }
 }
 void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
-    updateClearColor();
+    if(renderType == 0) {
+        updateClearColor();
+    }
     size_t newLen = wcslen(text);
     if(newStroke || forceNewStroke || outOfLine(text)) {
         DWORD i;
@@ -246,7 +257,6 @@ void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
         keyLabels[labelCount-1].time = lingerTime+fadeDuration;
         updateLabel(labelCount-1);
 
-        strokeTimer.Stop();
         strokeTimer.Start(keyStrokeDelay, false, true);
     }
 }
@@ -312,7 +322,7 @@ void updateMainWindow() {
 
     RECT box = {};
     DrawText(hdcBuffer, L"A", 1, &box, DT_CALCRECT);
-    labelCount = (desktopRect.bottom - desktopRect.top) / (box.bottom+4+labelSpacing) + 1;
+    labelCount = (desktopRect.bottom - desktopRect.top) / (box.bottom+4+labelSpacing);
 
     if(labelCount > MAXLABELS)
         labelCount = MAXLABELS;
