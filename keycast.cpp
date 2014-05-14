@@ -28,7 +28,6 @@ FLOAT dpiX, dpiY;
 #include "resource.h"
 #include "timer.h"
 CTimer showTimer;
-CTimer strokeTimer;
 
 #define MAXCHARS 4096
 WCHAR textBuffer[MAXCHARS];
@@ -153,7 +152,11 @@ void updateLabel(int i) {
     }
 }
 
+static int newStrokeCount = 0;
 static void startFade() {
+    if(newStrokeCount > 0) {
+        newStrokeCount -= 100;
+    }
     DWORD i = 0;
     for(i = 0; i < labelCount; i++) {
         if(keyLabels[i].time > fadeDuration) {
@@ -165,10 +168,6 @@ static void startFade() {
     }
 }
 
-static bool newStroke = true;
-static void startNewStroke() {
-    newStroke = true;
-}
 bool outOfLine(LPCWSTR text) {
     RECT box = {};
     size_t newLen = wcslen(text);
@@ -212,11 +211,12 @@ void updateClearColor() {
     }
 }
 void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
+    SetWindowPos(hMainWnd,HWND_TOPMOST,0,0,0,0,SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE);
     if(renderType == 0) {
         updateClearColor();
     }
     size_t newLen = wcslen(text);
-    if(newStroke || forceNewStroke || outOfLine(text)) {
+    if(forceNewStroke || (newStrokeCount <= 0) || outOfLine(text)) {
         DWORD i;
         for (i = 1; i < labelCount; i++) {
             if(keyLabels[i].time > 0) {
@@ -242,8 +242,7 @@ void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
         keyLabels[labelCount-1].time = lingerTime+fadeDuration;
         updateLabel(labelCount-1);
 
-        newStroke = false;
-        strokeTimer.Start(keyStrokeDelay, false, true);
+        newStrokeCount = keyStrokeDelay;
     } else {
         LPWSTR tmp = keyLabels[labelCount-1].text + keyLabels[labelCount-1].length;
         if(tmp+newLen >= textBufferEnd) {
@@ -257,7 +256,7 @@ void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
         keyLabels[labelCount-1].time = lingerTime+fadeDuration;
         updateLabel(labelCount-1);
 
-        strokeTimer.Start(keyStrokeDelay, false, true);
+        newStrokeCount = keyStrokeDelay;
     }
 }
 
@@ -695,7 +694,7 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
                     s_last_mouse=p;
                     RECT r;
                     GetWindowRect(hWnd,&r);
-                    SetWindowPos(hWnd,NULL,r.left+dx,r.top+dy,0,0,SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE);
+                    SetWindowPos(hWnd,HWND_TOPMOST,r.left+dx,r.top+dy,0,0,SWP_NOSIZE|SWP_NOACTIVATE);
                 }
             }
             break;
@@ -766,7 +765,7 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     InitCommonControlsEx(&icex);
 
     hMainWnd = CreateWindowEx(
-            WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
+            WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
             szWinName,
             szWinName,
             WS_POPUP,
@@ -802,7 +801,6 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
 
     showTimer.OnTimedEvent = startFade;
     showTimer.Start(100);
-    strokeTimer.OnTimedEvent = startNewStroke;
 
     kbdhook = SetWindowsHookEx(WH_KEYBOARD_LL, LLKeyboardProc, hThisInst, NULL);
 
