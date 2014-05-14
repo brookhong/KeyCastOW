@@ -73,6 +73,7 @@ RECT desktopRect;
 
 WCHAR *szWinName = L"KeyCastOW";
 HWND hMainWnd;
+HWND hDlgSettings;
 HINSTANCE hInstance;
 HDC hdcBuffer;
 
@@ -188,8 +189,7 @@ void updateClearColor() {
     RECT r;
     GetWindowRect(hMainWnd,&r);
 
-    DWORD i;
-    int x, y;
+    int i, x, y;
     for (i = labelCount-1; i > 0; i--) {
         x = r.left+keyLabels[i].rect.left;
         y = r.top+keyLabels[i].rect.top;
@@ -579,26 +579,104 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     saveSettings();
                 case IDCANCEL:
                     EndDialog(hwndDlg, wParam);
+                    SetWindowLong(hMainWnd, GWL_EXSTYLE, GetWindowLong(hMainWnd, GWL_EXSTYLE)| WS_EX_TRANSPARENT);
                     return TRUE;
             }
     }
     return FALSE;
 }
-LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
-{
+void stamp(HDC hdc, RECT &rt) {
+    TRIVERTEX vertex[2] ;
+    vertex[0].x     = 0;
+    vertex[0].y     = 0;
+    vertex[0].Red   = 0x0000;
+    vertex[0].Green = 0x8000;
+    vertex[0].Blue  = 0x8000;
+    vertex[0].Alpha = 0x0000;
+
+    vertex[1].x     = rt.right - rt.left;
+    vertex[1].y     = rt.bottom - rt.top;
+    vertex[1].Red   = 0x0000;
+    vertex[1].Green = 0xd000;
+    vertex[1].Blue  = 0xd000;
+    vertex[1].Alpha = 0x0000;
+
+    // Create a GRADIENT_RECT structure that
+    // references the TRIVERTEX vertices.
+    GRADIENT_RECT gRect;
+    gRect.UpperLeft  = 0;
+    gRect.LowerRight = 1;
+
+    // Draw a shaded rectangle.
+    GradientFill(hdc, vertex, 2, &gRect, 1, GRADIENT_FILL_RECT_H);
+}
+LRESULT CALLBACK DraggableWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     static POINT s_last_mouse;
-    static HMENU hPopMenu;
-    static NOTIFYICONDATA nid;
-
-
+    switch(message)
+    {
+        // hold mouse to move
+        case WM_LBUTTONDOWN:
+            SetCapture(hWnd);
+            GetCursorPos(&s_last_mouse);
+            showTimer.Stop();
+            break;
+        case WM_MOUSEMOVE:
+            if (GetCapture()==hWnd)
+            {
+                POINT p;
+                GetCursorPos(&p);
+                int dx= p.x - s_last_mouse.x;
+                int dy= p.y - s_last_mouse.y;
+                if (dx||dy)
+                {
+                    s_last_mouse=p;
+                    RECT r;
+                    GetWindowRect(hWnd,&r);
+                    SetWindowPos(hWnd,HWND_TOPMOST,r.left+dx,r.top+dy,0,0,SWP_NOSIZE|SWP_NOACTIVATE);
+                }
+            }
+            break;
+        case WM_LBUTTONUP:
+            ReleaseCapture();
+            showTimer.Start(100);
+            break;
+        default:
+            return DefWindowProc(hWnd, message, wParam, lParam);
+    }
+    return 0;
+}
+LRESULT CALLBACK StampWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     switch(message)
     {
         case WM_PAINT:
             {
                 PAINTSTRUCT ps;
-                HDC hdc;
+                HDC hdc = BeginPaint(hWnd, &ps);
+                RECT rt;
+                GetWindowRect(hWnd,&rt);
+                stamp(hdc, rt);
+                TextOut(hdc, 0, 0, L"keyLabels[i].text", 17);
+                //DrawText(hdc, L"keyLabels[i].text", 18, &rt, DT_CENTER | DT_VCENTER);
+                //FillRect(hdc, &rt, clearBrush);
+                EndPaint(hWnd, &ps);
+            }
+            break;
+        default:
+            return DraggableWndProc(hWnd, message, wParam, lParam);
+    }
+    return 0;
+}
+LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
+    static POINT s_last_mouse;
+    static HMENU hPopMenu;
+    static NOTIFYICONDATA nid;
+
+    switch(message) {
+        case WM_PAINT:
+            {
+                PAINTSTRUCT ps;
                 DWORD i;
-                hdc = BeginPaint(hWnd, &ps);
+                HDC hdc = BeginPaint(hWnd, &ps);
                 for(i = 0; i < labelCount; i ++) {
                     DrawAlphaBlend(hdc, i);
                 }
@@ -650,15 +728,8 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
                 switch ( LOWORD( wParam ) )
                 {
                     case MENU_CONFIG:
-                        if (DialogBox(NULL,
-                                    MAKEINTRESOURCE(IDD_DLGSETTINGS),
-                                    hWnd,
-                                    (DLGPROC)SettingsWndProc)==IDOK) {
-                            // Complete the command; szItemName contains the
-                            // name of the item to delete.
-                        } else {
-                            // Cancel the command.
-                        }
+                        ShowWindow(hDlgSettings, SW_SHOW);
+                        SetWindowLong(hMainWnd, GWL_EXSTYLE, GetWindowLong(hMainWnd, GWL_EXSTYLE)& ~WS_EX_TRANSPARENT);
                         break;
                     case MENU_RESTORE:
                         initSettings();
@@ -675,47 +746,34 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
                 }
             }
             break;
-
-        // hold mouse to move
-        case WM_LBUTTONDOWN:
-            SetCapture(hWnd);
-            GetCursorPos(&s_last_mouse);
-            showTimer.Stop();
-            break;
-        case WM_MOUSEMOVE:
-            if (GetCapture()==hWnd)
-            {
-                POINT p;
-                GetCursorPos(&p);
-                int dx= p.x - s_last_mouse.x;
-                int dy= p.y - s_last_mouse.y;
-                if (dx||dy)
-                {
-                    s_last_mouse=p;
-                    RECT r;
-                    GetWindowRect(hWnd,&r);
-                    SetWindowPos(hWnd,HWND_TOPMOST,r.left+dx,r.top+dy,0,0,SWP_NOSIZE|SWP_NOACTIVATE);
-                }
-            }
-            break;
-        case WM_LBUTTONUP:
-            ReleaseCapture();
-            showTimer.Start(100);
-            break;
-
         case WM_DESTROY:
             PostQuitMessage(0);
             break;
         default:
-            return DefWindowProc(hWnd, message, wParam, lParam);
+            return DraggableWndProc(hWnd, message, wParam, lParam);
     }
     return 0;
 }
+ATOM MyRegisterClassEx(HINSTANCE hInst, LPCWSTR className, WNDPROC wndProc) {
+    WNDCLASSEX wcl;
+    wcl.cbSize = sizeof(WNDCLASSEX);
+    wcl.hInstance = hInst;
+    wcl.lpszClassName = className;
+    wcl.lpfnWndProc = wndProc;
+    wcl.style = CS_DBLCLKS;
+    wcl.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+    wcl.hIconSm = LoadIcon(NULL, IDI_WINLOGO);
+    wcl.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wcl.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH);
+    wcl.lpszMenuName = NULL;
+    wcl.cbWndExtra = 0;
+    wcl.cbClsExtra = 0;
 
+    return RegisterClassEx(&wcl);
+}
 int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         LPSTR lpszArgs, int nWinMode)
 {
-    WNDCLASSEX wcl;
     MSG        msg;
 
     hInstance = hThisInst;
@@ -739,30 +797,17 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         dpiY /= 96.f;
         pD2DFactory->CreateDCRenderTarget(&props, &pDCRT);
     }
-    wcl.cbSize = sizeof(WNDCLASSEX);
-    wcl.hInstance = hThisInst;
-    wcl.lpszClassName = szWinName;
-    wcl.lpfnWndProc = WindowFunc;
-    wcl.style = CS_DBLCLKS;
-    wcl.hIcon = LoadIcon(NULL, IDI_APPLICATION);
-    wcl.hIconSm = LoadIcon(NULL, IDI_WINLOGO);
-    wcl.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wcl.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH);
-    wcl.lpszMenuName = NULL;
-    wcl.cbWndExtra = 0;
-    wcl.cbClsExtra = 0;
-
-    if(!RegisterClassEx(&wcl) )    {
-        MessageBox(NULL, L"Could not register window class", L"Error", MB_OK);
-        return 0;
-    }
-
     INITCOMMONCONTROLSEX icex;
     icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
     icex.dwICC = ICC_LINK_CLASS|ICC_LISTVIEW_CLASSES|ICC_PAGESCROLLER_CLASS
         |ICC_PROGRESS_CLASS|ICC_STANDARD_CLASSES|ICC_TAB_CLASSES|ICC_TREEVIEW_CLASSES
         |ICC_UPDOWN_CLASS|ICC_USEREX_CLASSES|ICC_WIN95_CLASSES;
     InitCommonControlsEx(&icex);
+
+    if(!MyRegisterClassEx(hThisInst, szWinName, WindowFunc)) {
+        MessageBox(NULL, L"Could not register window class", L"Error", MB_OK);
+        return 0;
+    }
 
     hMainWnd = CreateWindowEx(
             WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
@@ -776,6 +821,14 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
             hThisInst,
             NULL
             );
+    MyRegisterClassEx(hThisInst, L"STAMP", StampWndProc);
+    HWND hWndStamp = CreateWindowEx(
+            WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
+            L"STAMP", L"STAMP", WS_VISIBLE|WS_POPUP,
+            10, 20, 280, 160,
+            NULL, NULL, hThisInst, NULL);
+    SetWindowPos(hWndStamp,HWND_TOPMOST,0,0,0,0,SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE);
+    SetLayeredWindowAttributes(hWndStamp, clearColor, (BYTE)opacity, LWA_COLORKEY | LWA_ALPHA);
     if( !hMainWnd)    {
         MessageBox(NULL, L"Could not create window", L"Error", MB_OK);
         return 0;
@@ -798,6 +851,7 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
 
     updateMainWindow();
     ShowWindow(hMainWnd, SW_SHOW);
+    hDlgSettings = CreateDialog(hThisInst, MAKEINTRESOURCE(IDD_DLGSETTINGS), hMainWnd, (DLGPROC)SettingsWndProc);
 
     showTimer.OnTimedEvent = startFade;
     showTimer.Start(100);
