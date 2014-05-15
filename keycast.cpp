@@ -10,20 +10,8 @@
 #include <Commctrl.h>
 #include <stdio.h>
 
-#include <d2d1.h>
-template<class Interface> inline void SafeRelease( Interface **ppInterfaceToRelease) {
-    if (*ppInterfaceToRelease != NULL)
-    {
-        (*ppInterfaceToRelease)->Release();
-
-        (*ppInterfaceToRelease) = NULL;
-    }
-}
-ID2D1Factory *pD2DFactory = NULL;
-ID2D1DCRenderTarget *pDCRT = NULL;
-ID2D1SolidColorBrush *pBrush = NULL;
-ID2D1SolidColorBrush *pPen = NULL;
-FLOAT dpiX, dpiY;
+#include <gdiplus.h>
+using namespace Gdiplus;
 
 #include "resource.h"
 #include "timer.h"
@@ -44,10 +32,6 @@ struct KeyLabel{
     }
 };
 
-#define BR(bgr) (bgr>>16|(bgr&0x0000ff00)|(bgr&0x000000ff)<<16)
-COLORREF clearColor = RGB(255,255,255);
-HBRUSH clearBrush = (HBRUSH)GetStockObject(WHITE_BRUSH);
-
 DWORD keyStrokeDelay = 500;
 DWORD lingerTime = 1200;
 DWORD fadeDuration = 600;
@@ -61,7 +45,7 @@ DWORD opacity = 198;
 UINT tcModifiers = MOD_ALT;
 UINT tcKey = 0x42;      // 0x42 is 'b'
 DWORD cornerSize = 32;
-DWORD renderType = 0;   // 0 -- Direct2D, 1 -- GDI
+DWORD renderType = 0;
 
 #define MAXLABELS 60
 KeyLabel keyLabels[MAXLABELS];
@@ -82,36 +66,30 @@ HDC hdcBuffer;
 #define MENU_CONFIG    32
 #define MENU_EXIT      33
 #define MENU_RESTORE      34
-void DrawAlphaBlend (HDC hdcwnd, int i)
-{
-    ULONG   ulBitmapWidth, ulBitmapHeight;      // window width/height
-    RECT &rt = keyLabels[i].rect;
-
-    // calculate window width/height
-    ulBitmapWidth = rt.right - rt.left;
-    ulBitmapHeight = rt.bottom - rt.top;
-
-    // make sure we have at least some window size
-    if ((!ulBitmapWidth) || (!ulBitmapHeight))
-        return;
-
-    BLENDFUNCTION bf;      // structure for alpha blending
-    bf.BlendOp = AC_SRC_OVER;
-    bf.BlendFlags = 0;
-    int alpha = (int)(255.0*keyLabels[i].time/fadeDuration);
-    alpha = (alpha > 255) ? 255: alpha;
-    bf.SourceConstantAlpha = alpha;  // half of 0xff = 50% transparency
-    bf.AlphaFormat = 0;             // ignore source alpha channel
-
-    GdiAlphaBlend(hdcwnd, rt.left, rt.top,
-                ulBitmapWidth, ulBitmapHeight,
-                hdcBuffer, rt.left, rt.top, ulBitmapWidth, ulBitmapHeight, bf);
+void updateLayeredWindow(HWND hwnd, HDC memDC) {
+    RECT rt;
+    GetWindowRect(hwnd,&rt);
+    Rect rc(0, 0, rt.right-rt.left, rt.bottom-rt.top);
+    POINT ptSrc = {0, 0};
+    POINT ptDst = {rt.left, rt.top};
+    SIZE wndSize = {rc.Width, rc.Height};
+    BLENDFUNCTION blendFunction;
+    blendFunction.AlphaFormat = AC_SRC_ALPHA;
+    blendFunction.BlendFlags = 0;
+    blendFunction.BlendOp = AC_SRC_OVER;
+    blendFunction.SourceConstantAlpha = (BYTE)opacity;
+    HDC hdc = GetDC(hwnd);
+    ::UpdateLayeredWindow(hwnd,hdc,&ptDst,&wndSize,memDC,&ptSrc,0,&blendFunction,2);
+    ReleaseDC(hwnd, hdc);
 }
 void eraseLabel(int i) {
     RECT &rt = keyLabels[i].rect;
-    FillRect(hdcBuffer, &rt, clearBrush);
-    InvalidateRect(hMainWnd, &rt, TRUE);
+    Rect rc(rt.left, rt.top, rt.right-rt.left+2*borderSize, rt.bottom-rt.top+2*borderSize);
+    Graphics g(hdcBuffer);
+    g.SetClip(rc);
+    g.Clear(Color::Color(0, 0x7f,0,0x8f));
 }
+#define BR(alpha, bgr) (alpha<<24|bgr>>16|(bgr&0x0000ff00)|(bgr&0x000000ff)<<16)
 void updateLabel(int i) {
     // update change within hdcBuffer, then use InvalidateRect to trigger WM_PAINT
     // where DrawAlphaBlend is called to update change within paint DC
@@ -130,26 +108,31 @@ void updateLabel(int i) {
 
     if( ulBitmapWidth && ulBitmapHeight ) {
         // make sure we have at least some window size
-        if(renderType) {
-            FillRect(hdcBuffer, &rt, clearBrush);
-            RoundRect(hdcBuffer, rt.left+borderSize, rt.top+borderSize, rt.left+ulBitmapWidth-borderSize, rt.top+ulBitmapHeight-borderSize, cornerSize, cornerSize);
-        } else {
-            pDCRT->BindDC(hdcBuffer, &rt);
-            pDCRT->SetTransform(D2D1::Matrix3x2F::Translation(rt.left+0.0f, rt.top+0.0f));
-            RECT rc = {0, 0, ulBitmapWidth, ulBitmapHeight};
-            pDCRT->SetTransform(D2D1::Matrix3x2F::Identity());
-            D2D1_ROUNDED_RECT roundedRect = D2D1::RoundedRect(
-                    D2D1::RectF(borderSize*dpiX, borderSize*dpiY, (ulBitmapWidth-borderSize)*dpiX, (ulBitmapHeight-borderSize)*dpiY),
-                    cornerSize*dpiX,
-                    cornerSize*dpiY);
-            pDCRT->BeginDraw();
-            pDCRT->Clear(D2D1::ColorF( BR(clearColor), 1.0f ));
-            pDCRT->FillRoundedRectangle(roundedRect, pBrush);
-            pDCRT->DrawRoundedRectangle(roundedRect, pPen, borderSize*1.f);
-            pDCRT->EndDraw();
-        }
-        TextOut(hdcBuffer, rt.left+8+borderSize, rt.top+1+borderSize, keyLabels[i].text, keyLabels[i].length);
-        InvalidateRect(hMainWnd, &rt, TRUE);
+        Rect rc(rt.left+borderSize, rt.top+borderSize, ulBitmapWidth-borderSize, ulBitmapHeight-borderSize);
+        int alpha = (int)(255.0*keyLabels[i].time/fadeDuration);
+        alpha = (alpha > 255) ? 255: alpha;
+        GraphicsPath path;
+        path.AddArc(rc.X, rc.Y, cornerSize, cornerSize, 180, 90);
+        path.AddArc(rc.X + rc.Width - cornerSize, rc.Y, cornerSize, cornerSize, 270, 90);
+        path.AddArc(rc.X + rc.Width - cornerSize, rc.Y + rc.Height - cornerSize, (int)cornerSize, (int)cornerSize, 0, 90);
+        path.AddArc(rc.X, rc.Y + rc.Height - cornerSize, cornerSize, cornerSize, 90, 90);
+        path.AddLine(rc.X, rc.Y + rc.Height - cornerSize, rc.X, rc.Y + cornerSize/2);
+        Pen penPlus(Color::Color(BR(alpha, borderColor)), borderSize+0.0f);
+        SolidBrush brushPlus(Color::Color(BR(alpha, bgColor)));
+        Graphics g(hdcBuffer);
+        g.SetSmoothingMode(SmoothingModeAntiAlias);
+        g.SetTextRenderingHint(TextRenderingHintAntiAlias);
+        g.DrawPath(&penPlus, &path);
+        g.FillPath(&brushPlus, &path);
+
+        Font fontPlus(hdcBuffer);
+        PointF origin(rt.left+8.0f+borderSize, rt.top+1.0f+borderSize);
+        SolidBrush textBrushPlus(Color(BR(alpha, textColor)));
+        g.DrawString( keyLabels[i].text,
+                keyLabels[i].length,
+                &fontPlus,
+                origin,
+                &textBrushPlus);
     }
 }
 
@@ -164,9 +147,10 @@ static void startFade() {
             keyLabels[i].time -= 100;
         } else if(keyLabels[i].time > 0) {
             keyLabels[i].time -= 100;
-            InvalidateRect(hMainWnd, &keyLabels[i].rect, TRUE);
+            updateLabel(i);
         }
     }
+    updateLayeredWindow(hMainWnd, hdcBuffer);
 }
 
 bool outOfLine(LPCWSTR text) {
@@ -183,38 +167,8 @@ bool outOfLine(LPCWSTR text) {
     GetWindowRect(hMainWnd,&r);
     return (r.left+box.right+18+borderSize*2 >= (DWORD)desktopRect.right);
 }
-void updateClearColor() {
-    COLORREF cr = clearColor;
-    HDC hdc = GetDC(NULL); // get the desktop device context
-    RECT r;
-    GetWindowRect(hMainWnd,&r);
-
-    int i, x, y;
-    for (i = labelCount-1; i > 0; i--) {
-        x = r.left+keyLabels[i].rect.left;
-        y = r.top+keyLabels[i].rect.top;
-        if(keyLabels[i].time == 0 && x > 0 && x < desktopRect.right && y > 0 && y < desktopRect.bottom) {
-            cr = GetPixel(hdc, x, y);
-            break;
-        }
-    }
-    ReleaseDC(NULL, hdc);
-
-    if( cr != clearColor) {
-        clearColor = cr;
-        HBRUSH cb = CreateSolidBrush(clearColor);
-        SetClassLongPtr(hMainWnd, GCLP_HBRBACKGROUND, (LONG)cb);
-        DeleteObject(clearBrush);
-        clearBrush = cb;
-        SetLayeredWindowAttributes(hMainWnd, clearColor, (BYTE)opacity, LWA_COLORKEY | LWA_ALPHA);
-        InvalidateRect(hMainWnd, NULL, TRUE);
-    }
-}
 void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
     SetWindowPos(hMainWnd,HWND_TOPMOST,0,0,0,0,SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE);
-    if(renderType == 0) {
-        updateClearColor();
-    }
     size_t newLen = wcslen(text);
     if(forceNewStroke || (newStrokeCount <= 0) || outOfLine(text)) {
         DWORD i;
@@ -258,6 +212,7 @@ void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
 
         newStrokeCount = keyStrokeDelay;
     }
+    updateLayeredWindow(hMainWnd, hdcBuffer);
 }
 
 BOOL ColorDialog ( HWND hWnd, COLORREF &clr ) {
@@ -296,16 +251,6 @@ BOOL ColorDialog ( HWND hWnd, COLORREF &clr ) {
     return TRUE;
 }
 void updateMainWindow() {
-    SetLayeredWindowAttributes(hMainWnd, clearColor, (BYTE)opacity, LWA_COLORKEY | LWA_ALPHA);
-
-    if(pBrush) {
-        SafeRelease(&pBrush);
-    }
-    if(pPen) {
-        SafeRelease(&pPen);
-    }
-    pDCRT->CreateSolidColorBrush( D2D1::ColorF(BR(borderColor)), &pPen);
-    pDCRT->CreateSolidColorBrush( D2D1::ColorF(BR(bgColor)), &pBrush);
     HPEN pen = CreatePen(PS_SOLID, borderSize, borderColor);
     HPEN hPenOld = (HPEN)SelectObject(hdcBuffer, pen);
     DeleteObject(hPenOld);
@@ -351,7 +296,6 @@ void initSettings() {
     borderColor = bgColor;
     borderSize = 1;
     cornerSize = 32;
-    renderType = 0;
     tcModifiers = MOD_ALT;
     tcKey = 0x42;
     memset(&labelFont, 0, sizeof(labelFont));
@@ -392,7 +336,6 @@ BOOL saveSettings() {
     RegSetKeyValue(hChildKey, NULL, L"borderColor", REG_DWORD, (LPCVOID)&borderColor, sizeof(borderColor));
     RegSetKeyValue(hChildKey, NULL, L"borderSize", REG_DWORD, (LPCVOID)&borderSize, sizeof(borderSize));
     RegSetKeyValue(hChildKey, NULL, L"cornerSize", REG_DWORD, (LPCVOID)&cornerSize, sizeof(cornerSize));
-    RegSetKeyValue(hChildKey, NULL, L"renderType", REG_DWORD, (LPCVOID)&renderType, sizeof(renderType));
 
     RegCloseKey(hRootKey);
     RegCloseKey(hChildKey);
@@ -425,7 +368,6 @@ BOOL loadSettings() {
         RegGetValue(hChildKey, NULL, L"borderColor", RRF_RT_DWORD, NULL, &borderColor, &size);
         RegGetValue(hChildKey, NULL, L"borderSize", RRF_RT_DWORD, NULL, &borderSize, &size);
         RegGetValue(hChildKey, NULL, L"cornerSize", RRF_RT_DWORD, NULL, &cornerSize, &size);
-        RegGetValue(hChildKey, NULL, L"renderType", RRF_RT_DWORD, NULL, &renderType, &size);
 
         size = sizeof(labelFont);
         RegGetValue(hChildKey, NULL, L"labelFont", RRF_RT_REG_BINARY, NULL, &labelFont, &size);
@@ -458,9 +400,6 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                 SetDlgItemText(hwndDlg, IDC_BORDERSIZE, tmp);
                 swprintf(tmp, 256, L"%d", cornerSize);
                 SetDlgItemText(hwndDlg, IDC_CORNERSIZE, tmp);
-                ComboBox_AddString(GetDlgItem(hwndDlg, IDC_RENDER), L"Direct2D");
-                ComboBox_AddString(GetDlgItem(hwndDlg, IDC_RENDER), L"GDI");
-                ComboBox_SetCurSel(GetDlgItem(hwndDlg, IDC_RENDER), renderType);
                 CheckDlgButton(hwndDlg, IDC_MODCTRL, (tcModifiers & MOD_CONTROL) ? BST_CHECKED : BST_UNCHECKED);
                 CheckDlgButton(hwndDlg, IDC_MODALT, (tcModifiers & MOD_ALT) ? BST_CHECKED : BST_UNCHECKED);
                 CheckDlgButton(hwndDlg, IDC_MODSHIFT, (tcModifiers & MOD_SHIFT) ? BST_CHECKED : BST_UNCHECKED);
@@ -552,7 +491,6 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     borderSize = _wtoi(tmp);
                     GetDlgItemText(hwndDlg, IDC_CORNERSIZE, tmp, 256);
                     cornerSize = _wtoi(tmp);
-                    renderType = ComboBox_GetCurSel(GetDlgItem(hwndDlg, IDC_RENDER));
                     tcModifiers = 0;
                     if(BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MODCTRL)) {
                         tcModifiers |= MOD_CONTROL;
@@ -585,30 +523,40 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
     }
     return FALSE;
 }
-void stamp(HDC hdc, RECT &rt) {
-    TRIVERTEX vertex[2] ;
-    vertex[0].x     = 0;
-    vertex[0].y     = 0;
-    vertex[0].Red   = 0x0000;
-    vertex[0].Green = 0x8000;
-    vertex[0].Blue  = 0x8000;
-    vertex[0].Alpha = 0x0000;
+void stamp(HWND hwnd) {
+    RECT rt;
+    GetWindowRect(hwnd,&rt);
+    HDC hdc = GetDC(hwnd);
+    Rect rc(0, 0, rt.right-rt.left, rt.bottom-rt.top);
+    HDC memDC = ::CreateCompatibleDC(hdc);
+    //SetBkMode (memDC, TRANSPARENT);
+    HBITMAP memBitmap = ::CreateCompatibleBitmap(hdc,rc.Width,rc.Height);
+    ::SelectObject(memDC,memBitmap);
+    Graphics g(memDC);
+    g.SetSmoothingMode(SmoothingModeAntiAlias);
+    Pen pen(Color::Color(0x7f,0,0x8f), 0);
+    SolidBrush brush(Color::Color(0x7f,0,0x8f));
+    GraphicsPath path;
+    int d = 60;
+    path.AddArc(rc.X, rc.Y, d, d, 180, 90);
+    path.AddArc(rc.X + rc.Width - d, rc.Y, d, d, 270, 90);
+    path.AddArc(rc.X + rc.Width - d, rc.Y + rc.Height - d, d, d, 0, 90);
+    path.AddArc(rc.X, rc.Y + rc.Height - d, d, d, 90, 90);
+    path.AddLine(rc.X, rc.Y + rc.Height - d, rc.X, rc.Y + d/2);
+    g.DrawPath(&pen, &path);
+    g.FillPath(&brush, &path);
 
-    vertex[1].x     = rt.right - rt.left;
-    vertex[1].y     = rt.bottom - rt.top;
-    vertex[1].Red   = 0x0000;
-    vertex[1].Green = 0xd000;
-    vertex[1].Blue  = 0xd000;
-    vertex[1].Alpha = 0x0000;
-
-    // Create a GRADIENT_RECT structure that
-    // references the TRIVERTEX vertices.
-    GRADIENT_RECT gRect;
-    gRect.UpperLeft  = 0;
-    gRect.LowerRight = 1;
-
-    // Draw a shaded rectangle.
-    GradientFill(hdc, vertex, 2, &gRect, 1, GRADIENT_FILL_RECT_H);
+    POINT ptSrc = {0, 0};
+    SIZE wndSize = {rc.Width, rc.Height};
+    BLENDFUNCTION blendFunction;
+    blendFunction.AlphaFormat = AC_SRC_ALPHA;
+    blendFunction.BlendFlags = 0;
+    blendFunction.BlendOp = AC_SRC_OVER;
+    blendFunction.SourceConstantAlpha = 180;
+    ::UpdateLayeredWindow(hwnd,hdc,&ptSrc,&wndSize,memDC,&ptSrc,0,&blendFunction,2);
+    ::DeleteDC(memDC);
+    ::DeleteObject(memBitmap);
+    ReleaseDC(hwnd, hdc);
 }
 LRESULT CALLBACK DraggableWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     static POINT s_last_mouse;
@@ -645,45 +593,12 @@ LRESULT CALLBACK DraggableWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
     }
     return 0;
 }
-LRESULT CALLBACK StampWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
-    switch(message)
-    {
-        case WM_PAINT:
-            {
-                PAINTSTRUCT ps;
-                HDC hdc = BeginPaint(hWnd, &ps);
-                RECT rt;
-                GetWindowRect(hWnd,&rt);
-                stamp(hdc, rt);
-                TextOut(hdc, 0, 0, L"keyLabels[i].text", 17);
-                //DrawText(hdc, L"keyLabels[i].text", 18, &rt, DT_CENTER | DT_VCENTER);
-                //FillRect(hdc, &rt, clearBrush);
-                EndPaint(hWnd, &ps);
-            }
-            break;
-        default:
-            return DraggableWndProc(hWnd, message, wParam, lParam);
-    }
-    return 0;
-}
 LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     static POINT s_last_mouse;
     static HMENU hPopMenu;
     static NOTIFYICONDATA nid;
 
     switch(message) {
-        case WM_PAINT:
-            {
-                PAINTSTRUCT ps;
-                DWORD i;
-                HDC hdc = BeginPaint(hWnd, &ps);
-                for(i = 0; i < labelCount; i ++) {
-                    DrawAlphaBlend(hdc, i);
-                }
-                EndPaint(hWnd, &ps);
-            }
-            break;
-
         // trayicon
         case WM_CREATE:
             {
@@ -778,31 +693,16 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
 
     hInstance = hThisInst;
 
-    if (SUCCEEDED(CoInitialize(NULL))) {
-        D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &pD2DFactory);
-        // Create a DC render target.
-        D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(
-                D2D1_RENDER_TARGET_TYPE_DEFAULT,
-                D2D1::PixelFormat(
-                    DXGI_FORMAT_B8G8R8A8_UNORM,
-                    D2D1_ALPHA_MODE_PREMULTIPLIED),
-                0,
-                0,
-                D2D1_RENDER_TARGET_USAGE_NONE,
-                D2D1_FEATURE_LEVEL_DEFAULT
-                );
-
-        pD2DFactory->GetDesktopDpi(&dpiX, &dpiY);
-        dpiX /= 96.f;
-        dpiY /= 96.f;
-        pD2DFactory->CreateDCRenderTarget(&props, &pDCRT);
-    }
     INITCOMMONCONTROLSEX icex;
     icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
     icex.dwICC = ICC_LINK_CLASS|ICC_LISTVIEW_CLASSES|ICC_PAGESCROLLER_CLASS
         |ICC_PROGRESS_CLASS|ICC_STANDARD_CLASSES|ICC_TAB_CLASSES|ICC_TREEVIEW_CLASSES
         |ICC_UPDOWN_CLASS|ICC_USEREX_CLASSES|ICC_WIN95_CLASSES;
     InitCommonControlsEx(&icex);
+
+    GdiplusStartupInput gdiplusStartupInput;
+    ULONG_PTR           gdiplusToken;
+    GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
 
     if(!MyRegisterClassEx(hThisInst, szWinName, WindowFunc)) {
         MessageBox(NULL, L"Could not register window class", L"Error", MB_OK);
@@ -821,18 +721,20 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
             hThisInst,
             NULL
             );
-    MyRegisterClassEx(hThisInst, L"STAMP", StampWndProc);
-    HWND hWndStamp = CreateWindowEx(
-            WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
-            L"STAMP", L"STAMP", WS_VISIBLE|WS_POPUP,
-            10, 20, 280, 160,
-            NULL, NULL, hThisInst, NULL);
-    SetWindowPos(hWndStamp,HWND_TOPMOST,0,0,0,0,SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE);
-    SetLayeredWindowAttributes(hWndStamp, clearColor, (BYTE)opacity, LWA_COLORKEY | LWA_ALPHA);
     if( !hMainWnd)    {
         MessageBox(NULL, L"Could not create window", L"Error", MB_OK);
         return 0;
     }
+
+    //MyRegisterClassEx(hThisInst, L"STAMP", DraggableWndProc);
+    //HWND hWndStamp = CreateWindowEx(
+            //WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
+            //L"STAMP", L"STAMP", WS_VISIBLE|WS_POPUP,
+            //10, 20, 280, 160,
+            //NULL, NULL, hThisInst, NULL);
+    //SetWindowPos(hWndStamp,HWND_TOPMOST,0,0,0,0,SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE);
+    //stamp(hWndStamp);
+
     loadSettings();
     if (!RegisterHotKey( NULL, 1, tcModifiers | MOD_NOREPEAT, tcKey)) {
         MessageBox(NULL, L"Unable to register hotkey, you probably need go to settings to redefine your hotkey for toggle capturing.", L"Warning", MB_OK|MB_ICONWARNING);
@@ -877,12 +779,6 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     UnhookWindowsHookEx(kbdhook);
     UnregisterHotKey(NULL, 1);
 
-    if(pD2DFactory) {
-        SafeRelease(&pD2DFactory);
-        SafeRelease(&pDCRT);
-        SafeRelease(&pBrush);
-        SafeRelease(&pPen);
-        CoUninitialize();
-    }
+    GdiplusShutdown(gdiplusToken);
     return msg.wParam;
 }
