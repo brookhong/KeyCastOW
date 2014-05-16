@@ -22,7 +22,7 @@ WCHAR textBuffer[MAXCHARS];
 LPCWSTR textBufferEnd = textBuffer + MAXCHARS;
 
 struct KeyLabel{
-    RECT rect;
+    RectF rect;
     WCHAR *text;
     DWORD length;
     DWORD time;
@@ -32,20 +32,19 @@ struct KeyLabel{
     }
 };
 
-DWORD keyStrokeDelay = 500;
-DWORD lingerTime = 1200;
-DWORD fadeDuration = 600;
-DWORD labelSpacing = 30;
-COLORREF textColor = RGB(0,240, 33);
-COLORREF bgColor = RGB(0x7f,0,0x8f);
-COLORREF borderColor = bgColor;
-DWORD borderSize = 1;
+DWORD keyStrokeDelay;
+DWORD lingerTime;
+DWORD fadeDuration;
+DWORD labelSpacing;
+COLORREF textColor;
+COLORREF bgColor;
+COLORREF borderColor;
+int borderSize;
 LOGFONT labelFont;
-DWORD opacity = 198;
+DWORD opacity;
 UINT tcModifiers = MOD_ALT;
 UINT tcKey = 0x42;      // 0x42 is 'b'
-DWORD cornerSize = 32;
-DWORD renderType = 0;
+int cornerSize;
 
 #define MAXLABELS 60
 KeyLabel keyLabels[MAXLABELS];
@@ -59,14 +58,15 @@ WCHAR *szWinName = L"KeyCastOW";
 HWND hMainWnd;
 HWND hDlgSettings;
 HINSTANCE hInstance;
-HDC hdcBuffer;
+Graphics * g;
+Font * fontPlus = NULL;
 
 #define IDI_TRAY       100
 #define WM_TRAYMSG     101
 #define MENU_CONFIG    32
 #define MENU_EXIT      33
 #define MENU_RESTORE      34
-void updateLayeredWindow(HWND hwnd, HDC memDC) {
+void updateLayeredWindow(HWND hwnd) {
     RECT rt;
     GetWindowRect(hwnd,&rt);
     Rect rc(0, 0, rt.right-rt.left, rt.bottom-rt.top);
@@ -78,59 +78,47 @@ void updateLayeredWindow(HWND hwnd, HDC memDC) {
     blendFunction.BlendFlags = 0;
     blendFunction.BlendOp = AC_SRC_OVER;
     blendFunction.SourceConstantAlpha = (BYTE)opacity;
+    HDC hdcBuf = g->GetHDC();
     HDC hdc = GetDC(hwnd);
-    ::UpdateLayeredWindow(hwnd,hdc,&ptDst,&wndSize,memDC,&ptSrc,0,&blendFunction,2);
+    ::UpdateLayeredWindow(hwnd,hdc,&ptDst,&wndSize,hdcBuf,&ptSrc,0,&blendFunction,2);
     ReleaseDC(hwnd, hdc);
+    g->ReleaseHDC(hdcBuf);
 }
 void eraseLabel(int i) {
-    RECT &rt = keyLabels[i].rect;
-    Rect rc(rt.left, rt.top, rt.right-rt.left+2*borderSize, rt.bottom-rt.top+2*borderSize);
-    Graphics g(hdcBuffer);
-    g.SetClip(rc);
-    g.Clear(Color::Color(0, 0x7f,0,0x8f));
+    RectF &rt = keyLabels[i].rect;
+    RectF rc(rt.X-borderSize, rt.Y-borderSize, rt.Width+2*borderSize+1, rt.Height+2*borderSize+1);
+    g->SetClip(rc);
+    g->Clear(Color::Color(0, 0x7f,0,0x8f));
+    g->ResetClip();
 }
 #define BR(alpha, bgr) (alpha<<24|bgr>>16|(bgr&0x0000ff00)|(bgr&0x000000ff)<<16)
 void updateLabel(int i) {
-    // update change within hdcBuffer, then use InvalidateRect to trigger WM_PAINT
-    // where DrawAlphaBlend is called to update change within paint DC
     eraseLabel(i);
 
-    RECT box = {};
-    DrawText(hdcBuffer, keyLabels[i].text, keyLabels[i].length, &box, DT_CALCRECT);
-    keyLabels[i].rect.right = box.right+18+borderSize*2;
-
-    ULONG   ulBitmapWidth, ulBitmapHeight;      // window width/height
-    RECT &rt = keyLabels[i].rect;
-
-    // calculate window width/height
-    ulBitmapWidth = rt.right - rt.left;
-    ulBitmapHeight = rt.bottom - rt.top;
-
-    if( ulBitmapWidth && ulBitmapHeight ) {
-        // make sure we have at least some window size
-        Rect rc(rt.left+borderSize, rt.top+borderSize, ulBitmapWidth-borderSize, ulBitmapHeight-borderSize);
+    if(keyLabels[i].length > 0) {
+        RectF &rc = keyLabels[i].rect;
+        PointF origin(rc.X, rc.Y);
+        g->MeasureString(keyLabels[i].text, keyLabels[i].length, fontPlus, origin, &rc);
+        rc.Width = (rc.Width < cornerSize) ? cornerSize : rc.Width;
+        rc.Height = (rc.Height < cornerSize) ? cornerSize : rc.Height;
         int alpha = (int)(255.0*keyLabels[i].time/fadeDuration);
         alpha = (alpha > 255) ? 255: alpha;
         GraphicsPath path;
-        path.AddArc(rc.X, rc.Y, cornerSize, cornerSize, 180, 90);
-        path.AddArc(rc.X + rc.Width - cornerSize, rc.Y, cornerSize, cornerSize, 270, 90);
-        path.AddArc(rc.X + rc.Width - cornerSize, rc.Y + rc.Height - cornerSize, (int)cornerSize, (int)cornerSize, 0, 90);
-        path.AddArc(rc.X, rc.Y + rc.Height - cornerSize, cornerSize, cornerSize, 90, 90);
-        path.AddLine(rc.X, rc.Y + rc.Height - cornerSize, rc.X, rc.Y + cornerSize/2);
+        REAL dx = rc.Width - cornerSize, dy = rc.Height - cornerSize;
+        path.AddArc(rc.X, rc.Y, (REAL)cornerSize, (REAL)cornerSize, 170, 90);
+        path.AddArc(rc.X + dx, rc.Y, (REAL)cornerSize, (REAL)cornerSize, 270, 90);
+        path.AddArc(rc.X + dx, rc.Y + dy, (REAL)cornerSize, (REAL)cornerSize, 0, 90);
+        path.AddArc(rc.X, rc.Y + dy, (REAL)cornerSize, (REAL)cornerSize, 90, 90);
+        path.AddLine(rc.X, rc.Y + dy, rc.X, rc.Y + cornerSize/2);
         Pen penPlus(Color::Color(BR(alpha, borderColor)), borderSize+0.0f);
         SolidBrush brushPlus(Color::Color(BR(alpha, bgColor)));
-        Graphics g(hdcBuffer);
-        g.SetSmoothingMode(SmoothingModeAntiAlias);
-        g.SetTextRenderingHint(TextRenderingHintAntiAlias);
-        g.DrawPath(&penPlus, &path);
-        g.FillPath(&brushPlus, &path);
+        g->DrawPath(&penPlus, &path);
+        g->FillPath(&brushPlus, &path);
 
-        Font fontPlus(hdcBuffer);
-        PointF origin(rt.left+8.0f+borderSize, rt.top+1.0f+borderSize);
         SolidBrush textBrushPlus(Color(BR(alpha, textColor)));
-        g.DrawString( keyLabels[i].text,
+        g->DrawString( keyLabels[i].text,
                 keyLabels[i].length,
-                &fontPlus,
+                fontPlus,
                 origin,
                 &textBrushPlus);
     }
@@ -142,19 +130,22 @@ static void startFade() {
         newStrokeCount -= 100;
     }
     DWORD i = 0;
+    BOOL dirty = FALSE;
     for(i = 0; i < labelCount; i++) {
         if(keyLabels[i].time > fadeDuration) {
             keyLabels[i].time -= 100;
         } else if(keyLabels[i].time > 0) {
             keyLabels[i].time -= 100;
             updateLabel(i);
+            dirty = TRUE;
         }
     }
-    updateLayeredWindow(hMainWnd, hdcBuffer);
+    if(dirty) {
+        updateLayeredWindow(hMainWnd);
+    }
 }
 
 bool outOfLine(LPCWSTR text) {
-    RECT box = {};
     size_t newLen = wcslen(text);
     if(keyLabels[labelCount-1].text+keyLabels[labelCount-1].length+newLen >= textBufferEnd) {
         wcscpy_s(textBuffer, MAXCHARS, keyLabels[labelCount-1].text);
@@ -162,10 +153,12 @@ bool outOfLine(LPCWSTR text) {
     }
     LPWSTR tmp = keyLabels[labelCount-1].text + keyLabels[labelCount-1].length;
     wcscpy_s(tmp, (textBufferEnd-tmp), text);
-    DrawText(hdcBuffer, keyLabels[labelCount-1].text, keyLabels[labelCount-1].length+newLen, &box, DT_CALCRECT);
+    RectF box;
+    PointF origin(0, 0);
+    g->MeasureString(keyLabels[labelCount-1].text, keyLabels[labelCount-1].length, fontPlus, origin, &box);
     RECT r;
     GetWindowRect(hMainWnd,&r);
-    return (r.left+box.right+18+borderSize*2 >= (DWORD)desktopRect.right);
+    return (r.left+box.Width+2*cornerSize+borderSize*2 >= desktopRect.right);
 }
 void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
     SetWindowPos(hMainWnd,HWND_TOPMOST,0,0,0,0,SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE);
@@ -182,7 +175,6 @@ void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
             keyLabels[i-1].text = keyLabels[i].text;
             keyLabels[i-1].length = keyLabels[i].length;
             keyLabels[i-1].time = keyLabels[i].time;
-            keyLabels[i-1].rect.right = keyLabels[i].rect.right;
             updateLabel(i-1);
             eraseLabel(i);
         }
@@ -212,7 +204,7 @@ void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
 
         newStrokeCount = keyStrokeDelay;
     }
-    updateLayeredWindow(hMainWnd, hdcBuffer);
+    updateLayeredWindow(hMainWnd);
 }
 
 BOOL ColorDialog ( HWND hWnd, COLORREF &clr ) {
@@ -251,32 +243,31 @@ BOOL ColorDialog ( HWND hWnd, COLORREF &clr ) {
     return TRUE;
 }
 void updateMainWindow() {
-    HPEN pen = CreatePen(PS_SOLID, borderSize, borderColor);
-    HPEN hPenOld = (HPEN)SelectObject(hdcBuffer, pen);
-    DeleteObject(hPenOld);
-    HBRUSH brush = CreateSolidBrush(bgColor);
-    HBRUSH hBrushOld = (HBRUSH)SelectObject(hdcBuffer, brush);
-    DeleteObject(hBrushOld);
-
+    HDC hdc = GetDC(hMainWnd);
     HFONT hlabelFont = CreateFontIndirect(&labelFont);
-    HFONT hFontOld = (HFONT)SelectObject(hdcBuffer, hlabelFont);
+    HFONT hFontOld = (HFONT)SelectObject(hdc, hlabelFont);
     DeleteObject(hFontOld);
-    SetTextColor(hdcBuffer, textColor);
-    SetBkMode (hdcBuffer, TRANSPARENT);
 
-    RECT box = {};
-    DrawText(hdcBuffer, L"A", 1, &box, DT_CALCRECT);
-    labelCount = (desktopRect.bottom - desktopRect.top) / (box.bottom+4+labelSpacing);
+    if(fontPlus) {
+        delete fontPlus;
+    }
+    fontPlus = new Font(hdc, hlabelFont);
+    ReleaseDC(hMainWnd, hdc);
+    RectF box;
+    PointF origin(0, 0);
+    g->MeasureString(L"\u263b - KeyCastOW OFF", 16, fontPlus, origin, &box);
+    REAL unitH = box.Height+2*borderSize+labelSpacing;
+    labelCount = (desktopRect.bottom - desktopRect.top) / (int)unitH;
+    SetWindowPos(hMainWnd, HWND_TOPMOST, desktopRect.right-(int)(box.Width+4*borderSize), 0, desktopRect.right, desktopRect.bottom, 0);
 
     if(labelCount > MAXLABELS)
         labelCount = MAXLABELS;
 
+    g->Clear(Color::Color(0, 0x7f,0,0x8f));
     for(DWORD i = 0; i < labelCount; i ++) {
         keyLabels[i].time = 0;
-        keyLabels[i].rect.left = 0;
-        keyLabels[i].rect.right = 0;
-        keyLabels[i].rect.top = (box.bottom+4)*i+labelSpacing*i;
-        keyLabels[i].rect.bottom = (box.bottom+4)*(i+1)+labelSpacing*i+borderSize*2;
+        keyLabels[i].rect.X = (REAL)borderSize;
+        keyLabels[i].rect.Y = unitH*i;
         if(keyLabels[i].time > lingerTime+fadeDuration) {
             keyLabels[i].time = lingerTime+fadeDuration;
         }
@@ -284,29 +275,31 @@ void updateMainWindow() {
             updateLabel(i);
         }
     }
+
 }
 void initSettings() {
     keyStrokeDelay = 500;
     lingerTime = 1200;
     fadeDuration = 600;
     labelSpacing = 30;
-    textColor = RGB(0,240, 33);
-    bgColor = RGB(0x7f,0,0x8f);
+    textColor = RGB(255, 255, 255);
+    bgColor = RGB(75, 75, 75);
     opacity = 198;
-    borderColor = bgColor;
-    borderSize = 1;
-    cornerSize = 32;
+    borderColor = RGB(0, 128, 255);
+    borderSize = 8;
+    cornerSize = 16;
     tcModifiers = MOD_ALT;
     tcKey = 0x42;
     memset(&labelFont, 0, sizeof(labelFont));
     labelFont.lfCharSet = DEFAULT_CHARSET;
     labelFont.lfHeight = -37;
     labelFont.lfPitchAndFamily = DEFAULT_PITCH;
-    labelFont.lfWeight  = FW_NORMAL;
+    labelFont.lfWeight  = FW_BLACK;
     labelFont.lfOutPrecision = OUT_DEFAULT_PRECIS;
     labelFont.lfClipPrecision = CLIP_DEFAULT_PRECIS;
     labelFont.lfQuality = ANTIALIASED_QUALITY;
-    wcscpy_s(labelFont.lfFaceName, sizeof(labelFont.lfFaceName), TEXT("Arial"));
+    // incidently clear global variables in debug mode
+    wcscpy_s(labelFont.lfFaceName, LF_FACESIZE, TEXT("Arial Black"));
 }
 BOOL saveSettings() {
     BOOL res = TRUE;
@@ -450,7 +443,6 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
 
                         if(ChooseFont (&cf)) {
                             updateMainWindow();
-                            InvalidateRect(hMainWnd, NULL, TRUE);
                             saveSettings();
                         }
                     }
@@ -458,21 +450,18 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                 case IDC_TEXTCOLOR:
                     if( ColorDialog(hwndDlg, textColor) ) {
                         updateMainWindow();
-                        InvalidateRect(hMainWnd, NULL, TRUE);
                         saveSettings();
                     }
                     return TRUE;
                 case IDC_BGCOLOR:
                     if( ColorDialog(hwndDlg, bgColor) ) {
                         updateMainWindow();
-                        InvalidateRect(hMainWnd, NULL, TRUE);
                         saveSettings();
                     }
                     return TRUE;
                 case IDC_BORDERCOLOR:
                     if( ColorDialog(hwndDlg, borderColor) ) {
                         updateMainWindow();
-                        InvalidateRect(hMainWnd, NULL, TRUE);
                         saveSettings();
                     }
                     return TRUE;
@@ -491,6 +480,7 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     borderSize = _wtoi(tmp);
                     GetDlgItemText(hwndDlg, IDC_CORNERSIZE, tmp, 256);
                     cornerSize = _wtoi(tmp);
+                    cornerSize = (cornerSize - borderSize > 0) ? cornerSize : borderSize + 1;
                     tcModifiers = 0;
                     if(BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MODCTRL)) {
                         tcModifiers |= MOD_CONTROL;
@@ -513,7 +503,6 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                         }
                     }
                     updateMainWindow();
-                    InvalidateRect(hMainWnd, NULL, TRUE);
                     saveSettings();
                 case IDCANCEL:
                     EndDialog(hwndDlg, wParam);
@@ -650,7 +639,6 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
                         initSettings();
                         saveSettings();
                         updateMainWindow();
-                        InvalidateRect(hMainWnd, NULL, TRUE);
                         break;
                     case MENU_EXIT:
                         Shell_NotifyIcon( NIM_DELETE, &nid );
@@ -741,15 +729,17 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     }
 
     SystemParametersInfo(SPI_GETWORKAREA,NULL,&desktopRect,NULL);
-    SetWindowPos(hMainWnd, HWND_TOPMOST, desktopRect.right*4/5, 0, desktopRect.right, desktopRect.bottom, 0);
     UpdateWindow(hMainWnd);
 
     HDC hdc = GetDC(hMainWnd);
-    hdcBuffer = CreateCompatibleDC(hdc);
+    HDC hdcBuffer = CreateCompatibleDC(hdc);
     HBITMAP hbitmap = CreateCompatibleBitmap(hdc, desktopRect.right, desktopRect.bottom);
     HBITMAP hBitmapOld = SelectBitmap(hdcBuffer, hbitmap);
     ReleaseDC(hMainWnd, hdc);
     DeleteObject(hBitmapOld);
+    g = new Graphics(hdcBuffer);
+    g->SetSmoothingMode(SmoothingModeAntiAlias);
+    g->SetTextRenderingHint(TextRenderingHintAntiAlias);
 
     updateMainWindow();
     ShowWindow(hMainWnd, SW_SHOW);
@@ -778,6 +768,8 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
 
     UnhookWindowsHookEx(kbdhook);
     UnregisterHotKey(NULL, 1);
+    delete g;
+    delete fontPlus;
 
     GdiplusShutdown(gdiplusToken);
     return msg.wParam;
