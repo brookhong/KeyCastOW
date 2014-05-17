@@ -41,7 +41,7 @@ COLORREF bgColor;
 COLORREF borderColor;
 int borderSize;
 LOGFONT labelFont;
-DWORD opacity;
+DWORD bgOpacity, textOpacity, borderOpacity;
 UINT tcModifiers = MOD_ALT;
 UINT tcKey = 0x42;      // 0x42 is 'b'
 int cornerSize;
@@ -77,7 +77,7 @@ void updateLayeredWindow(HWND hwnd) {
     blendFunction.AlphaFormat = AC_SRC_ALPHA;
     blendFunction.BlendFlags = 0;
     blendFunction.BlendOp = AC_SRC_OVER;
-    blendFunction.SourceConstantAlpha = (BYTE)opacity;
+    blendFunction.SourceConstantAlpha = 255;
     HDC hdcBuf = g->GetHDC();
     HDC hdc = GetDC(hwnd);
     ::UpdateLayeredWindow(hwnd,hdc,&ptDst,&wndSize,hdcBuf,&ptSrc,0,&blendFunction,2);
@@ -101,8 +101,9 @@ void updateLabel(int i) {
         g->MeasureString(keyLabels[i].text, keyLabels[i].length, fontPlus, origin, &rc);
         rc.Width = (rc.Width < cornerSize) ? cornerSize : rc.Width;
         rc.Height = (rc.Height < cornerSize) ? cornerSize : rc.Height;
-        int alpha = (int)(255.0*keyLabels[i].time/fadeDuration);
-        alpha = (alpha > 255) ? 255: alpha;
+        double r = 1.0*keyLabels[i].time/fadeDuration;
+        r = (r > 1.0) ? 1.0 : r;
+        int bgAlpha = (int)(r*bgOpacity), textAlpha = (int)(r*textOpacity), borderAlpha = (int)(r*borderOpacity);
         GraphicsPath path;
         REAL dx = rc.Width - cornerSize, dy = rc.Height - cornerSize;
         path.AddArc(rc.X, rc.Y, (REAL)cornerSize, (REAL)cornerSize, 170, 90);
@@ -110,12 +111,12 @@ void updateLabel(int i) {
         path.AddArc(rc.X + dx, rc.Y + dy, (REAL)cornerSize, (REAL)cornerSize, 0, 90);
         path.AddArc(rc.X, rc.Y + dy, (REAL)cornerSize, (REAL)cornerSize, 90, 90);
         path.AddLine(rc.X, rc.Y + dy, rc.X, rc.Y + cornerSize/2);
-        Pen penPlus(Color::Color(BR(alpha, borderColor)), borderSize+0.0f);
-        SolidBrush brushPlus(Color::Color(BR(alpha, bgColor)));
+        Pen penPlus(Color::Color(BR(borderAlpha, borderColor)), borderSize+0.0f);
+        SolidBrush brushPlus(Color::Color(BR(bgAlpha, bgColor)));
         g->DrawPath(&penPlus, &path);
         g->FillPath(&brushPlus, &path);
 
-        SolidBrush textBrushPlus(Color(BR(alpha, textColor)));
+        SolidBrush textBrushPlus(Color(BR(textAlpha, textColor)));
         g->DrawString( keyLabels[i].text,
                 keyLabels[i].length,
                 fontPlus,
@@ -284,7 +285,7 @@ void initSettings() {
     labelSpacing = 30;
     textColor = RGB(255, 255, 255);
     bgColor = RGB(75, 75, 75);
-    opacity = 198;
+    bgOpacity = textOpacity = borderOpacity = 198;
     borderColor = RGB(0, 128, 255);
     borderSize = 8;
     cornerSize = 16;
@@ -323,7 +324,9 @@ BOOL saveSettings() {
     RegSetKeyValue(hChildKey, NULL, L"bgColor", REG_DWORD, (LPCVOID)&bgColor, sizeof(bgColor));
     RegSetKeyValue(hChildKey, NULL, L"textColor", REG_DWORD, (LPCVOID)&textColor, sizeof(textColor));
     RegSetKeyValue(hChildKey, NULL, L"labelFont", REG_BINARY, (LPCVOID)&labelFont, sizeof(labelFont));
-    RegSetKeyValue(hChildKey, NULL, L"opacity", REG_DWORD, (LPCVOID)&opacity, sizeof(opacity));
+    RegSetKeyValue(hChildKey, NULL, L"bgOpacity", REG_DWORD, (LPCVOID)&bgOpacity, sizeof(bgOpacity));
+    RegSetKeyValue(hChildKey, NULL, L"textOpacity", REG_DWORD, (LPCVOID)&textOpacity, sizeof(textOpacity));
+    RegSetKeyValue(hChildKey, NULL, L"borderOpacity", REG_DWORD, (LPCVOID)&borderOpacity, sizeof(borderOpacity));
     RegSetKeyValue(hChildKey, NULL, L"tcModifiers", REG_DWORD, (LPCVOID)&tcModifiers, sizeof(tcModifiers));
     RegSetKeyValue(hChildKey, NULL, L"tcKey", REG_DWORD, (LPCVOID)&tcKey, sizeof(tcKey));
     RegSetKeyValue(hChildKey, NULL, L"borderColor", REG_DWORD, (LPCVOID)&borderColor, sizeof(borderColor));
@@ -355,7 +358,9 @@ BOOL loadSettings() {
         RegGetValue(hChildKey, NULL, L"labelSpacing", RRF_RT_DWORD, NULL, &labelSpacing, &size);
         RegGetValue(hChildKey, NULL, L"bgColor", RRF_RT_DWORD, NULL, &bgColor, &size);
         RegGetValue(hChildKey, NULL, L"textColor", RRF_RT_DWORD, NULL, &textColor, &size);
-        RegGetValue(hChildKey, NULL, L"opacity", RRF_RT_DWORD, NULL, &opacity, &size);
+        RegGetValue(hChildKey, NULL, L"bgOpacity", RRF_RT_DWORD, NULL, &bgOpacity, &size);
+        RegGetValue(hChildKey, NULL, L"textOpacity", RRF_RT_DWORD, NULL, &textOpacity, &size);
+        RegGetValue(hChildKey, NULL, L"borderOpacity", RRF_RT_DWORD, NULL, &borderOpacity, &size);
         RegGetValue(hChildKey, NULL, L"tcModifiers", RRF_RT_DWORD, NULL, &tcModifiers, &size);
         RegGetValue(hChildKey, NULL, L"tcKey", RRF_RT_DWORD, NULL, &tcKey, &size);
         RegGetValue(hChildKey, NULL, L"borderColor", RRF_RT_DWORD, NULL, &borderColor, &size);
@@ -372,6 +377,33 @@ BOOL loadSettings() {
     RegCloseKey(hChildKey);
     return res;
 }
+void renderSettingsData(HWND hwndDlg) {
+    WCHAR tmp[256];
+    swprintf(tmp, 256, L"%d", keyStrokeDelay);
+    SetDlgItemText(hwndDlg, IDC_KEYSTROKEDELAY, tmp);
+    swprintf(tmp, 256, L"%d", lingerTime);
+    SetDlgItemText(hwndDlg, IDC_LINGERTIME, tmp);
+    swprintf(tmp, 256, L"%d", fadeDuration);
+    SetDlgItemText(hwndDlg, IDC_FADEDURATION, tmp);
+    swprintf(tmp, 256, L"%d", labelSpacing);
+    SetDlgItemText(hwndDlg, IDC_LABELSPACING, tmp);
+    swprintf(tmp, 256, L"%d", bgOpacity);
+    SetDlgItemText(hwndDlg, IDC_BGOPACITY, tmp);
+    swprintf(tmp, 256, L"%d", textOpacity);
+    SetDlgItemText(hwndDlg, IDC_TEXTOPACITY, tmp);
+    swprintf(tmp, 256, L"%d", borderOpacity);
+    SetDlgItemText(hwndDlg, IDC_BORDEROPACITY, tmp);
+    swprintf(tmp, 256, L"%d", borderSize);
+    SetDlgItemText(hwndDlg, IDC_BORDERSIZE, tmp);
+    swprintf(tmp, 256, L"%d", cornerSize);
+    SetDlgItemText(hwndDlg, IDC_CORNERSIZE, tmp);
+    CheckDlgButton(hwndDlg, IDC_MODCTRL, (tcModifiers & MOD_CONTROL) ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwndDlg, IDC_MODALT, (tcModifiers & MOD_ALT) ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwndDlg, IDC_MODSHIFT, (tcModifiers & MOD_SHIFT) ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwndDlg, IDC_MODWIN, (tcModifiers & MOD_WIN) ? BST_CHECKED : BST_UNCHECKED);
+    swprintf(tmp, 256, L"%c", MapVirtualKey(tcKey, MAPVK_VK_TO_CHAR));
+    SetDlgItemText(hwndDlg, IDC_TCKEY, tmp);
+}
 BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     WCHAR tmp[256];
@@ -379,26 +411,7 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
     {
         case WM_INITDIALOG:
             {
-                swprintf(tmp, 256, L"%d", keyStrokeDelay);
-                SetDlgItemText(hwndDlg, IDC_KEYSTROKEDELAY, tmp);
-                swprintf(tmp, 256, L"%d", lingerTime);
-                SetDlgItemText(hwndDlg, IDC_LINGERTIME, tmp);
-                swprintf(tmp, 256, L"%d", fadeDuration);
-                SetDlgItemText(hwndDlg, IDC_FADEDURATION, tmp);
-                swprintf(tmp, 256, L"%d", labelSpacing);
-                SetDlgItemText(hwndDlg, IDC_LABELSPACING, tmp);
-                swprintf(tmp, 256, L"%d", opacity);
-                SetDlgItemText(hwndDlg, IDC_OPACITY, tmp);
-                swprintf(tmp, 256, L"%d", borderSize);
-                SetDlgItemText(hwndDlg, IDC_BORDERSIZE, tmp);
-                swprintf(tmp, 256, L"%d", cornerSize);
-                SetDlgItemText(hwndDlg, IDC_CORNERSIZE, tmp);
-                CheckDlgButton(hwndDlg, IDC_MODCTRL, (tcModifiers & MOD_CONTROL) ? BST_CHECKED : BST_UNCHECKED);
-                CheckDlgButton(hwndDlg, IDC_MODALT, (tcModifiers & MOD_ALT) ? BST_CHECKED : BST_UNCHECKED);
-                CheckDlgButton(hwndDlg, IDC_MODSHIFT, (tcModifiers & MOD_SHIFT) ? BST_CHECKED : BST_UNCHECKED);
-                CheckDlgButton(hwndDlg, IDC_MODWIN, (tcModifiers & MOD_WIN) ? BST_CHECKED : BST_UNCHECKED);
-                swprintf(tmp, 256, L"%c", MapVirtualKey(tcKey, MAPVK_VK_TO_CHAR));
-                SetDlgItemText(hwndDlg, IDC_TCKEY, tmp);
+                renderSettingsData(hwndDlg);
                 RECT r;
                 GetWindowRect(hwndDlg, &r);
                 SetWindowPos(hwndDlg, 0, desktopRect.right - r.right + r.left, desktopRect.bottom - r.bottom + r.top, 0, 0, SWP_NOSIZE);
@@ -474,8 +487,12 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     fadeDuration = _wtoi(tmp);
                     GetDlgItemText(hwndDlg, IDC_LABELSPACING, tmp, 256);
                     labelSpacing = _wtoi(tmp);
-                    GetDlgItemText(hwndDlg, IDC_OPACITY, tmp, 256);
-                    opacity = _wtoi(tmp);
+                    GetDlgItemText(hwndDlg, IDC_BGOPACITY, tmp, 256);
+                    bgOpacity = _wtoi(tmp);
+                    GetDlgItemText(hwndDlg, IDC_TEXTOPACITY, tmp, 256);
+                    textOpacity = _wtoi(tmp);
+                    GetDlgItemText(hwndDlg, IDC_BORDEROPACITY, tmp, 256);
+                    borderOpacity = _wtoi(tmp);
                     GetDlgItemText(hwndDlg, IDC_BORDERSIZE, tmp, 256);
                     borderSize = _wtoi(tmp);
                     GetDlgItemText(hwndDlg, IDC_CORNERSIZE, tmp, 256);
@@ -632,6 +649,7 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
                 switch ( LOWORD( wParam ) )
                 {
                     case MENU_CONFIG:
+                        renderSettingsData(hDlgSettings);
                         ShowWindow(hDlgSettings, SW_SHOW);
                         SetWindowLong(hMainWnd, GWL_EXSTYLE, GetWindowLong(hMainWnd, GWL_EXSTYLE)& ~WS_EX_TRANSPARENT);
                         break;
@@ -734,7 +752,7 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     HDC hdc = GetDC(hMainWnd);
     HDC hdcBuffer = CreateCompatibleDC(hdc);
     HBITMAP hbitmap = CreateCompatibleBitmap(hdc, desktopRect.right, desktopRect.bottom);
-    HBITMAP hBitmapOld = SelectBitmap(hdcBuffer, hbitmap);
+    HBITMAP hBitmapOld = (HBITMAP)SelectObject(hdcBuffer, (HGDIOBJ)hbitmap);
     ReleaseDC(hMainWnd, hdc);
     DeleteObject(hBitmapOld);
     g = new Graphics(hdcBuffer);
@@ -744,6 +762,10 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     updateMainWindow();
     ShowWindow(hMainWnd, SW_SHOW);
     hDlgSettings = CreateDialog(hThisInst, MAKEINTRESOURCE(IDD_DLGSETTINGS), hMainWnd, (DLGPROC)SettingsWndProc);
+    HFONT hlabelFont = CreateFont(20,10,0,0,FW_BLACK,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_OUTLINE_PRECIS,
+                CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY, VARIABLE_PITCH,TEXT("Arial"));
+    HWND hlink = GetDlgItem(hDlgSettings, IDC_SYSLINK1);
+    SendMessage(hlink, WM_SETFONT, (WPARAM)hlabelFont, TRUE);
 
     showTimer.OnTimedEvent = startFade;
     showTimer.Start(100);
