@@ -45,6 +45,7 @@ DWORD bgOpacity, textOpacity, borderOpacity;
 UINT tcModifiers = MOD_ALT;
 UINT tcKey = 0x42;      // 0x42 is 'b'
 int cornerSize;
+WCHAR branding[256];
 
 #define MAXLABELS 60
 KeyLabel keyLabels[MAXLABELS];
@@ -57,6 +58,7 @@ RECT desktopRect;
 WCHAR *szWinName = L"KeyCastOW";
 HWND hMainWnd;
 HWND hDlgSettings;
+HWND hWndStamp;
 HINSTANCE hInstance;
 Graphics * g;
 Font * fontPlus = NULL;
@@ -243,6 +245,49 @@ BOOL ColorDialog ( HWND hWnd, COLORREF &clr ) {
     }
     return TRUE;
 }
+void stamp(HWND hwnd, LPCWSTR text) {
+    RECT rt;
+    GetWindowRect(hwnd,&rt);
+    HDC hdc = GetDC(hwnd);
+    HDC memDC = ::CreateCompatibleDC(hdc);
+    HBITMAP memBitmap = ::CreateCompatibleBitmap(hdc, desktopRect.right, desktopRect.bottom);
+    ::SelectObject(memDC,memBitmap);
+    Graphics g(memDC);
+    g.SetSmoothingMode(SmoothingModeAntiAlias);
+    g.SetTextRenderingHint(TextRenderingHintAntiAlias);
+    g.Clear(Color::Color(0, 0x7f,0,0x8f));
+
+    HFONT hFont = CreateFontIndirect(&labelFont);
+    HFONT hFontOld = (HFONT)SelectObject(memDC, hFont);
+    DeleteObject(hFontOld);
+    Font font(memDC, hFont);
+    PointF origin((REAL)borderSize, (REAL)borderSize);
+    RectF rc((REAL)borderSize, (REAL)borderSize, 0.0, 0.0);
+    g.MeasureString(text, wcslen(text), &font, origin, &rc);
+    SIZE wndSize = {2*borderSize+(LONG)rc.Width, 2*borderSize+(LONG)rc.Height};
+    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, wndSize.cx, wndSize.cy, SWP_NOMOVE);
+
+    SolidBrush bgBrush(Color::Color(0xaf007cfe));
+    g.FillRectangle(&bgBrush, rc);
+    SolidBrush textBrushPlus(Color(0xaf303030));
+    g.DrawString(text, wcslen(text), &font, origin, &textBrushPlus);
+    origin.X += 2;
+    origin.Y += 2;
+    SolidBrush brushPlus(Color::Color(0xaffefefe));
+    g.DrawString(text, wcslen(text), &font, origin, &brushPlus);
+
+    POINT ptSrc = {0, 0};
+    POINT ptDst = {rt.left, rt.top};
+    BLENDFUNCTION blendFunction;
+    blendFunction.AlphaFormat = AC_SRC_ALPHA;
+    blendFunction.BlendFlags = 0;
+    blendFunction.BlendOp = AC_SRC_OVER;
+    blendFunction.SourceConstantAlpha = 255;
+    ::UpdateLayeredWindow(hwnd,hdc,&ptDst,&wndSize,memDC,&ptSrc,0,&blendFunction,2);
+    ::DeleteDC(memDC);
+    ::DeleteObject(memBitmap);
+    ReleaseDC(hwnd, hdc);
+}
 void updateMainWindow() {
     HDC hdc = GetDC(hMainWnd);
     HFONT hlabelFont = CreateFontIndirect(&labelFont);
@@ -277,6 +322,7 @@ void updateMainWindow() {
         }
     }
 
+    stamp(hWndStamp, branding);
 }
 void initSettings() {
     keyStrokeDelay = 500;
@@ -289,6 +335,7 @@ void initSettings() {
     borderColor = RGB(0, 128, 255);
     borderSize = 8;
     cornerSize = 16;
+    wcscpy_s(branding, 256, TEXT("Press any key to try, double click to configure."));
     tcModifiers = MOD_ALT;
     tcKey = 0x42;
     memset(&labelFont, 0, sizeof(labelFont));
@@ -332,6 +379,7 @@ BOOL saveSettings() {
     RegSetKeyValue(hChildKey, NULL, L"borderColor", REG_DWORD, (LPCVOID)&borderColor, sizeof(borderColor));
     RegSetKeyValue(hChildKey, NULL, L"borderSize", REG_DWORD, (LPCVOID)&borderSize, sizeof(borderSize));
     RegSetKeyValue(hChildKey, NULL, L"cornerSize", REG_DWORD, (LPCVOID)&cornerSize, sizeof(cornerSize));
+    RegSetKeyValue(hChildKey, NULL, L"branding", REG_SZ, (LPCVOID)branding, wcslen(branding)*sizeof(WCHAR));
 
     RegCloseKey(hRootKey);
     RegCloseKey(hChildKey);
@@ -366,6 +414,8 @@ BOOL loadSettings() {
         RegGetValue(hChildKey, NULL, L"borderColor", RRF_RT_DWORD, NULL, &borderColor, &size);
         RegGetValue(hChildKey, NULL, L"borderSize", RRF_RT_DWORD, NULL, &borderSize, &size);
         RegGetValue(hChildKey, NULL, L"cornerSize", RRF_RT_DWORD, NULL, &cornerSize, &size);
+        size = 256;
+        RegGetValue(hChildKey, NULL, L"branding", RRF_RT_REG_SZ, NULL, branding, &size);
 
         size = sizeof(labelFont);
         RegGetValue(hChildKey, NULL, L"labelFont", RRF_RT_REG_BINARY, NULL, &labelFont, &size);
@@ -396,6 +446,7 @@ void renderSettingsData(HWND hwndDlg) {
     swprintf(tmp, 256, L"%d", borderSize);
     SetDlgItemText(hwndDlg, IDC_BORDERSIZE, tmp);
     swprintf(tmp, 256, L"%d", cornerSize);
+    SetDlgItemText(hwndDlg, IDC_BRANDING, branding);
     SetDlgItemText(hwndDlg, IDC_CORNERSIZE, tmp);
     CheckDlgButton(hwndDlg, IDC_MODCTRL, (tcModifiers & MOD_CONTROL) ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_MODALT, (tcModifiers & MOD_ALT) ? BST_CHECKED : BST_UNCHECKED);
@@ -498,6 +549,7 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     GetDlgItemText(hwndDlg, IDC_CORNERSIZE, tmp, 256);
                     cornerSize = _wtoi(tmp);
                     cornerSize = (cornerSize - borderSize > 0) ? cornerSize : borderSize + 1;
+                    GetDlgItemText(hwndDlg, IDC_BRANDING, branding, 256);
                     tcModifiers = 0;
                     if(BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MODCTRL)) {
                         tcModifiers |= MOD_CONTROL;
@@ -529,41 +581,6 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
     }
     return FALSE;
 }
-void stamp(HWND hwnd) {
-    RECT rt;
-    GetWindowRect(hwnd,&rt);
-    HDC hdc = GetDC(hwnd);
-    Rect rc(0, 0, rt.right-rt.left, rt.bottom-rt.top);
-    HDC memDC = ::CreateCompatibleDC(hdc);
-    //SetBkMode (memDC, TRANSPARENT);
-    HBITMAP memBitmap = ::CreateCompatibleBitmap(hdc,rc.Width,rc.Height);
-    ::SelectObject(memDC,memBitmap);
-    Graphics g(memDC);
-    g.SetSmoothingMode(SmoothingModeAntiAlias);
-    Pen pen(Color::Color(0x7f,0,0x8f), 0);
-    SolidBrush brush(Color::Color(0x7f,0,0x8f));
-    GraphicsPath path;
-    int d = 60;
-    path.AddArc(rc.X, rc.Y, d, d, 180, 90);
-    path.AddArc(rc.X + rc.Width - d, rc.Y, d, d, 270, 90);
-    path.AddArc(rc.X + rc.Width - d, rc.Y + rc.Height - d, d, d, 0, 90);
-    path.AddArc(rc.X, rc.Y + rc.Height - d, d, d, 90, 90);
-    path.AddLine(rc.X, rc.Y + rc.Height - d, rc.X, rc.Y + d/2);
-    g.DrawPath(&pen, &path);
-    g.FillPath(&brush, &path);
-
-    POINT ptSrc = {0, 0};
-    SIZE wndSize = {rc.Width, rc.Height};
-    BLENDFUNCTION blendFunction;
-    blendFunction.AlphaFormat = AC_SRC_ALPHA;
-    blendFunction.BlendFlags = 0;
-    blendFunction.BlendOp = AC_SRC_OVER;
-    blendFunction.SourceConstantAlpha = 180;
-    ::UpdateLayeredWindow(hwnd,hdc,&ptSrc,&wndSize,memDC,&ptSrc,0,&blendFunction,2);
-    ::DeleteDC(memDC);
-    ::DeleteObject(memBitmap);
-    ReleaseDC(hwnd, hdc);
-}
 LRESULT CALLBACK DraggableWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     static POINT s_last_mouse;
     switch(message)
@@ -593,6 +610,9 @@ LRESULT CALLBACK DraggableWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
         case WM_LBUTTONUP:
             ReleaseCapture();
             showTimer.Start(100);
+            break;
+        case WM_LBUTTONDBLCLK:
+            SendMessage( hMainWnd, WM_COMMAND, MENU_CONFIG, 0 );
             break;
         default:
             return DefWindowProc(hWnd, message, wParam, lParam);
@@ -732,21 +752,18 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         return 0;
     }
 
-    //MyRegisterClassEx(hThisInst, L"STAMP", DraggableWndProc);
-    //HWND hWndStamp = CreateWindowEx(
-            //WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
-            //L"STAMP", L"STAMP", WS_VISIBLE|WS_POPUP,
-            //10, 20, 280, 160,
-            //NULL, NULL, hThisInst, NULL);
-    //SetWindowPos(hWndStamp,HWND_TOPMOST,0,0,0,0,SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE);
-    //stamp(hWndStamp);
-
     loadSettings();
+    SystemParametersInfo(SPI_GETWORKAREA,NULL,&desktopRect,NULL);
+    MyRegisterClassEx(hThisInst, L"STAMP", DraggableWndProc);
+    hWndStamp = CreateWindowEx(
+            WS_EX_LAYERED | WS_EX_NOACTIVATE,
+            L"STAMP", L"STAMP", WS_VISIBLE|WS_POPUP,
+            0, 0, 1, 1,
+            NULL, NULL, hThisInst, NULL);
+
     if (!RegisterHotKey( NULL, 1, tcModifiers | MOD_NOREPEAT, tcKey)) {
         MessageBox(NULL, L"Unable to register hotkey, you probably need go to settings to redefine your hotkey for toggle capturing.", L"Warning", MB_OK|MB_ICONWARNING);
     }
-
-    SystemParametersInfo(SPI_GETWORKAREA,NULL,&desktopRect,NULL);
     UpdateWindow(hMainWnd);
 
     HDC hdc = GetDC(hMainWnd);
