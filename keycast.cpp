@@ -16,35 +16,62 @@ using namespace Gdiplus;
 #include "resource.h"
 #include "timer.h"
 CTimer showTimer;
+CTimer previewTimer;
 
 #define MAXCHARS 4096
 WCHAR textBuffer[MAXCHARS];
 LPCWSTR textBufferEnd = textBuffer + MAXCHARS;
 
-struct KeyLabel{
+struct KeyLabel {
     RectF rect;
     WCHAR *text;
     DWORD length;
     DWORD time;
+    double alpha;
     KeyLabel() {
         text = textBuffer;
         length = 0;
     }
 };
 
-DWORD keyStrokeDelay;
-DWORD lingerTime;
-DWORD fadeDuration;
+struct LabelSettings {
+    DWORD keyStrokeDelay;
+    DWORD lingerTime;
+    DWORD fadeDuration;
+    LOGFONT labelFont;
+    COLORREF bgColor, textColor, borderColor;
+    DWORD bgOpacity, textOpacity, borderOpacity;
+    int borderSize;
+    int cornerSize;
+    void reset() {
+        keyStrokeDelay = 500;
+        lingerTime = 1200;
+        fadeDuration = 600;
+        bgColor = RGB(75, 75, 75);
+        textColor = RGB(255, 255, 255);
+        borderColor = RGB(0, 128, 255);
+        bgOpacity = textOpacity = borderOpacity = 198;
+        borderSize = 8;
+        cornerSize = 16;
+        memset(&labelFont, 0, sizeof(labelFont));
+        labelFont.lfCharSet = DEFAULT_CHARSET;
+        labelFont.lfHeight = -37;
+        labelFont.lfPitchAndFamily = DEFAULT_PITCH;
+        labelFont.lfWeight  = FW_BLACK;
+        labelFont.lfOutPrecision = OUT_DEFAULT_PRECIS;
+        labelFont.lfClipPrecision = CLIP_DEFAULT_PRECIS;
+        labelFont.lfQuality = ANTIALIASED_QUALITY;
+        // incidently clear global variables in debug mode
+        wcscpy_s(labelFont.lfFaceName, LF_FACESIZE, TEXT("Arial Black"));
+    }
+    LabelSettings() {
+        reset();
+    }
+};
+LabelSettings labelSettings, previewLabelSettings;
 DWORD labelSpacing;
-COLORREF textColor;
-COLORREF bgColor;
-COLORREF borderColor;
-int borderSize;
-LOGFONT labelFont;
-DWORD bgOpacity, textOpacity, borderOpacity;
 UINT tcModifiers = MOD_ALT;
 UINT tcKey = 0x42;      // 0x42 is 'b'
-int cornerSize;
 WCHAR branding[256];
 
 #define MAXLABELS 60
@@ -88,7 +115,7 @@ void updateLayeredWindow(HWND hwnd) {
 }
 void eraseLabel(int i) {
     RectF &rt = keyLabels[i].rect;
-    RectF rc(rt.X-borderSize, rt.Y-borderSize, rt.Width+2*borderSize+1, rt.Height+2*borderSize+1);
+    RectF rc(rt.X-labelSettings.borderSize, rt.Y-labelSettings.borderSize, rt.Width+2*labelSettings.borderSize+1, rt.Height+2*labelSettings.borderSize+1);
     g->SetClip(rc);
     g->Clear(Color::Color(0, 0x7f,0,0x8f));
     g->ResetClip();
@@ -101,24 +128,24 @@ void updateLabel(int i) {
         RectF &rc = keyLabels[i].rect;
         PointF origin(rc.X, rc.Y);
         g->MeasureString(keyLabels[i].text, keyLabels[i].length, fontPlus, origin, &rc);
-        rc.Width = (rc.Width < cornerSize) ? cornerSize : rc.Width;
-        rc.Height = (rc.Height < cornerSize) ? cornerSize : rc.Height;
-        double r = 1.0*keyLabels[i].time/fadeDuration;
-        r = (r > 1.0) ? 1.0 : r;
-        int bgAlpha = (int)(r*bgOpacity), textAlpha = (int)(r*textOpacity), borderAlpha = (int)(r*borderOpacity);
+        rc.Width = (rc.Width < labelSettings.cornerSize) ? labelSettings.cornerSize : rc.Width;
+        rc.Height = (rc.Height < labelSettings.cornerSize) ? labelSettings.cornerSize : rc.Height;
+        keyLabels[i].alpha = 1.0*keyLabels[i].time/labelSettings.fadeDuration;
+        keyLabels[i].alpha = (keyLabels[i].alpha > 1.0) ? 1.0 : keyLabels[i].alpha;
+        int bgAlpha = (int)(keyLabels[i].alpha*labelSettings.bgOpacity), textAlpha = (int)(keyLabels[i].alpha*labelSettings.textOpacity), borderAlpha = (int)(keyLabels[i].alpha*labelSettings.borderOpacity);
         GraphicsPath path;
-        REAL dx = rc.Width - cornerSize, dy = rc.Height - cornerSize;
-        path.AddArc(rc.X, rc.Y, (REAL)cornerSize, (REAL)cornerSize, 170, 90);
-        path.AddArc(rc.X + dx, rc.Y, (REAL)cornerSize, (REAL)cornerSize, 270, 90);
-        path.AddArc(rc.X + dx, rc.Y + dy, (REAL)cornerSize, (REAL)cornerSize, 0, 90);
-        path.AddArc(rc.X, rc.Y + dy, (REAL)cornerSize, (REAL)cornerSize, 90, 90);
-        path.AddLine(rc.X, rc.Y + dy, rc.X, rc.Y + cornerSize/2);
-        Pen penPlus(Color::Color(BR(borderAlpha, borderColor)), borderSize+0.0f);
-        SolidBrush brushPlus(Color::Color(BR(bgAlpha, bgColor)));
+        REAL dx = rc.Width - labelSettings.cornerSize, dy = rc.Height - labelSettings.cornerSize;
+        path.AddArc(rc.X, rc.Y, (REAL)labelSettings.cornerSize, (REAL)labelSettings.cornerSize, 170, 90);
+        path.AddArc(rc.X + dx, rc.Y, (REAL)labelSettings.cornerSize, (REAL)labelSettings.cornerSize, 270, 90);
+        path.AddArc(rc.X + dx, rc.Y + dy, (REAL)labelSettings.cornerSize, (REAL)labelSettings.cornerSize, 0, 90);
+        path.AddArc(rc.X, rc.Y + dy, (REAL)labelSettings.cornerSize, (REAL)labelSettings.cornerSize, 90, 90);
+        path.AddLine(rc.X, rc.Y + dy, rc.X, rc.Y + labelSettings.cornerSize/2);
+        Pen penPlus(Color::Color(BR(borderAlpha, labelSettings.borderColor)), labelSettings.borderSize+0.0f);
+        SolidBrush brushPlus(Color::Color(BR(bgAlpha, labelSettings.bgColor)));
         g->DrawPath(&penPlus, &path);
         g->FillPath(&brushPlus, &path);
 
-        SolidBrush textBrushPlus(Color(BR(textAlpha, textColor)));
+        SolidBrush textBrushPlus(Color(BR(textAlpha, labelSettings.textColor)));
         g->DrawString( keyLabels[i].text,
                 keyLabels[i].length,
                 fontPlus,
@@ -135,9 +162,9 @@ static void startFade() {
     DWORD i = 0;
     BOOL dirty = FALSE;
     for(i = 0; i < labelCount; i++) {
-        if(keyLabels[i].time > fadeDuration) {
+        if(keyLabels[i].time > labelSettings.fadeDuration) {
             keyLabels[i].time -= 100;
-        } else if(keyLabels[i].time > 0) {
+        } else if(keyLabels[i].time > 0 || keyLabels[i].alpha > 0.0) {
             keyLabels[i].time -= 100;
             updateLabel(i);
             dirty = TRUE;
@@ -161,7 +188,7 @@ bool outOfLine(LPCWSTR text) {
     g->MeasureString(keyLabels[labelCount-1].text, keyLabels[labelCount-1].length, fontPlus, origin, &box);
     RECT r;
     GetWindowRect(hMainWnd,&r);
-    return (r.left+box.Width+2*cornerSize+borderSize*2 >= desktopRect.right);
+    return (r.left+box.Width+2*labelSettings.cornerSize+labelSettings.borderSize*2 >= desktopRect.right);
 }
 void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
     SetWindowPos(hMainWnd,HWND_TOPMOST,0,0,0,0,SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE);
@@ -188,10 +215,10 @@ void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
         wcscpy_s(keyLabels[labelCount-1].text, textBufferEnd-keyLabels[labelCount-1].text, text);
         keyLabels[labelCount-1].length = newLen;
 
-        keyLabels[labelCount-1].time = lingerTime+fadeDuration;
+        keyLabels[labelCount-1].time = labelSettings.lingerTime+labelSettings.fadeDuration;
         updateLabel(labelCount-1);
 
-        newStrokeCount = keyStrokeDelay;
+        newStrokeCount = labelSettings.keyStrokeDelay;
     } else {
         LPWSTR tmp = keyLabels[labelCount-1].text + keyLabels[labelCount-1].length;
         if(tmp+newLen >= textBufferEnd) {
@@ -202,10 +229,10 @@ void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
             keyLabels[labelCount-1].length += newLen;
         }
         wcscpy_s(tmp, (textBufferEnd-tmp), text);
-        keyLabels[labelCount-1].time = lingerTime+fadeDuration;
+        keyLabels[labelCount-1].time = labelSettings.lingerTime+labelSettings.fadeDuration;
         updateLabel(labelCount-1);
 
-        newStrokeCount = keyStrokeDelay;
+        newStrokeCount = labelSettings.keyStrokeDelay;
     }
     updateLayeredWindow(hMainWnd);
 }
@@ -257,24 +284,24 @@ void stamp(HWND hwnd, LPCWSTR text) {
     g.SetTextRenderingHint(TextRenderingHintAntiAlias);
     g.Clear(Color::Color(0, 0x7f,0,0x8f));
 
-    HFONT hFont = CreateFontIndirect(&labelFont);
-    HFONT hFontOld = (HFONT)SelectObject(memDC, hFont);
-    DeleteObject(hFontOld);
-    Font font(memDC, hFont);
-    PointF origin((REAL)borderSize, (REAL)borderSize);
-    RectF rc((REAL)borderSize, (REAL)borderSize, 0.0, 0.0);
-    g.MeasureString(text, wcslen(text), &font, origin, &rc);
-    SIZE wndSize = {2*borderSize+(LONG)rc.Width, 2*borderSize+(LONG)rc.Height};
+    RectF rc((REAL)labelSettings.borderSize, (REAL)labelSettings.borderSize, 0.0, 0.0);
+    SizeF stringSize, layoutSize((REAL)desktopRect.right, (REAL)desktopRect.bottom);
+    StringFormat format;
+    format.SetAlignment(StringAlignmentCenter);
+    g.MeasureString(text, wcslen(text), fontPlus, layoutSize, &format, &stringSize);
+    rc.Width = stringSize.Width;
+    rc.Height = stringSize.Height;
+    SIZE wndSize = {2*labelSettings.borderSize+(LONG)rc.Width, 2*labelSettings.borderSize+(LONG)rc.Height};
     SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, wndSize.cx, wndSize.cy, SWP_NOMOVE);
 
     SolidBrush bgBrush(Color::Color(0xaf007cfe));
     g.FillRectangle(&bgBrush, rc);
     SolidBrush textBrushPlus(Color(0xaf303030));
-    g.DrawString(text, wcslen(text), &font, origin, &textBrushPlus);
-    origin.X += 2;
-    origin.Y += 2;
+    g.DrawString(text, wcslen(text), fontPlus, rc, &format, &textBrushPlus);
     SolidBrush brushPlus(Color::Color(0xaffefefe));
-    g.DrawString(text, wcslen(text), &font, origin, &brushPlus);
+    rc.X += 2;
+    rc.Y += 2;
+    g.DrawString(text, wcslen(text), fontPlus, rc, &format, &brushPlus);
 
     POINT ptSrc = {0, 0};
     POINT ptDst = {rt.left, rt.top};
@@ -290,7 +317,7 @@ void stamp(HWND hwnd, LPCWSTR text) {
 }
 void updateMainWindow() {
     HDC hdc = GetDC(hMainWnd);
-    HFONT hlabelFont = CreateFontIndirect(&labelFont);
+    HFONT hlabelFont = CreateFontIndirect(&labelSettings.labelFont);
     HFONT hFontOld = (HFONT)SelectObject(hdc, hlabelFont);
     DeleteObject(hFontOld);
 
@@ -302,20 +329,19 @@ void updateMainWindow() {
     RectF box;
     PointF origin(0, 0);
     g->MeasureString(L"\u263b - KeyCastOW OFF", 16, fontPlus, origin, &box);
-    REAL unitH = box.Height+2*borderSize+labelSpacing;
+    REAL unitH = box.Height+2*labelSettings.borderSize+labelSpacing;
     labelCount = (desktopRect.bottom - desktopRect.top) / (int)unitH;
-    SetWindowPos(hMainWnd, HWND_TOPMOST, desktopRect.right-(int)(box.Width+4*borderSize), 0, desktopRect.right, desktopRect.bottom, 0);
+    SetWindowPos(hMainWnd, HWND_TOPMOST, desktopRect.right-(int)(box.Width+4*labelSettings.borderSize), 0, desktopRect.right, desktopRect.bottom, 0);
 
     if(labelCount > MAXLABELS)
         labelCount = MAXLABELS;
 
     g->Clear(Color::Color(0, 0x7f,0,0x8f));
     for(DWORD i = 0; i < labelCount; i ++) {
-        keyLabels[i].time = 0;
-        keyLabels[i].rect.X = (REAL)borderSize;
+        keyLabels[i].rect.X = (REAL)labelSettings.borderSize;
         keyLabels[i].rect.Y = unitH*i;
-        if(keyLabels[i].time > lingerTime+fadeDuration) {
-            keyLabels[i].time = lingerTime+fadeDuration;
+        if(keyLabels[i].time > labelSettings.lingerTime+labelSettings.fadeDuration) {
+            keyLabels[i].time = labelSettings.lingerTime+labelSettings.fadeDuration;
         }
         if(keyLabels[i].time > 0) {
             updateLabel(i);
@@ -325,29 +351,12 @@ void updateMainWindow() {
     stamp(hWndStamp, branding);
 }
 void initSettings() {
-    keyStrokeDelay = 500;
-    lingerTime = 1200;
-    fadeDuration = 600;
+    labelSettings.reset();
+    previewLabelSettings.reset();
     labelSpacing = 30;
-    textColor = RGB(255, 255, 255);
-    bgColor = RGB(75, 75, 75);
-    bgOpacity = textOpacity = borderOpacity = 198;
-    borderColor = RGB(0, 128, 255);
-    borderSize = 8;
-    cornerSize = 16;
     wcscpy_s(branding, 256, TEXT("Press any key to try, double click to configure."));
     tcModifiers = MOD_ALT;
     tcKey = 0x42;
-    memset(&labelFont, 0, sizeof(labelFont));
-    labelFont.lfCharSet = DEFAULT_CHARSET;
-    labelFont.lfHeight = -37;
-    labelFont.lfPitchAndFamily = DEFAULT_PITCH;
-    labelFont.lfWeight  = FW_BLACK;
-    labelFont.lfOutPrecision = OUT_DEFAULT_PRECIS;
-    labelFont.lfClipPrecision = CLIP_DEFAULT_PRECIS;
-    labelFont.lfQuality = ANTIALIASED_QUALITY;
-    // incidently clear global variables in debug mode
-    wcscpy_s(labelFont.lfFaceName, LF_FACESIZE, TEXT("Arial Black"));
 }
 BOOL saveSettings() {
     BOOL res = TRUE;
@@ -361,24 +370,24 @@ BOOL saveSettings() {
         return FALSE;
     }
 
-    if(RegSetKeyValue(hChildKey, NULL, L"keyStrokeDelay", REG_DWORD, (LPCVOID)&keyStrokeDelay, sizeof(keyStrokeDelay)) != ERROR_SUCCESS) {
+    if(RegSetKeyValue(hChildKey, NULL, L"keyStrokeDelay", REG_DWORD, (LPCVOID)&labelSettings.keyStrokeDelay, sizeof(labelSettings.keyStrokeDelay)) != ERROR_SUCCESS) {
         res = FALSE;
     }
 
-    RegSetKeyValue(hChildKey, NULL, L"lingerTime", REG_DWORD, (LPCVOID)&lingerTime, sizeof(lingerTime));
-    RegSetKeyValue(hChildKey, NULL, L"fadeDuration", REG_DWORD, (LPCVOID)&fadeDuration, sizeof(fadeDuration));
+    RegSetKeyValue(hChildKey, NULL, L"lingerTime", REG_DWORD, (LPCVOID)&labelSettings.lingerTime, sizeof(labelSettings.lingerTime));
+    RegSetKeyValue(hChildKey, NULL, L"fadeDuration", REG_DWORD, (LPCVOID)&labelSettings.fadeDuration, sizeof(labelSettings.fadeDuration));
+    RegSetKeyValue(hChildKey, NULL, L"bgColor", REG_DWORD, (LPCVOID)&labelSettings.bgColor, sizeof(labelSettings.bgColor));
+    RegSetKeyValue(hChildKey, NULL, L"textColor", REG_DWORD, (LPCVOID)&labelSettings.textColor, sizeof(labelSettings.textColor));
+    RegSetKeyValue(hChildKey, NULL, L"labelFont", REG_BINARY, (LPCVOID)&labelSettings.labelFont, sizeof(labelSettings.labelFont));
+    RegSetKeyValue(hChildKey, NULL, L"bgOpacity", REG_DWORD, (LPCVOID)&labelSettings.bgOpacity, sizeof(labelSettings.bgOpacity));
+    RegSetKeyValue(hChildKey, NULL, L"textOpacity", REG_DWORD, (LPCVOID)&labelSettings.textOpacity, sizeof(labelSettings.textOpacity));
+    RegSetKeyValue(hChildKey, NULL, L"borderOpacity", REG_DWORD, (LPCVOID)&labelSettings.borderOpacity, sizeof(labelSettings.borderOpacity));
+    RegSetKeyValue(hChildKey, NULL, L"borderColor", REG_DWORD, (LPCVOID)&labelSettings.borderColor, sizeof(labelSettings.borderColor));
+    RegSetKeyValue(hChildKey, NULL, L"borderSize", REG_DWORD, (LPCVOID)&labelSettings.borderSize, sizeof(labelSettings.borderSize));
+    RegSetKeyValue(hChildKey, NULL, L"cornerSize", REG_DWORD, (LPCVOID)&labelSettings.cornerSize, sizeof(labelSettings.cornerSize));
     RegSetKeyValue(hChildKey, NULL, L"labelSpacing", REG_DWORD, (LPCVOID)&labelSpacing, sizeof(labelSpacing));
-    RegSetKeyValue(hChildKey, NULL, L"bgColor", REG_DWORD, (LPCVOID)&bgColor, sizeof(bgColor));
-    RegSetKeyValue(hChildKey, NULL, L"textColor", REG_DWORD, (LPCVOID)&textColor, sizeof(textColor));
-    RegSetKeyValue(hChildKey, NULL, L"labelFont", REG_BINARY, (LPCVOID)&labelFont, sizeof(labelFont));
-    RegSetKeyValue(hChildKey, NULL, L"bgOpacity", REG_DWORD, (LPCVOID)&bgOpacity, sizeof(bgOpacity));
-    RegSetKeyValue(hChildKey, NULL, L"textOpacity", REG_DWORD, (LPCVOID)&textOpacity, sizeof(textOpacity));
-    RegSetKeyValue(hChildKey, NULL, L"borderOpacity", REG_DWORD, (LPCVOID)&borderOpacity, sizeof(borderOpacity));
     RegSetKeyValue(hChildKey, NULL, L"tcModifiers", REG_DWORD, (LPCVOID)&tcModifiers, sizeof(tcModifiers));
     RegSetKeyValue(hChildKey, NULL, L"tcKey", REG_DWORD, (LPCVOID)&tcKey, sizeof(tcKey));
-    RegSetKeyValue(hChildKey, NULL, L"borderColor", REG_DWORD, (LPCVOID)&borderColor, sizeof(borderColor));
-    RegSetKeyValue(hChildKey, NULL, L"borderSize", REG_DWORD, (LPCVOID)&borderSize, sizeof(borderSize));
-    RegSetKeyValue(hChildKey, NULL, L"cornerSize", REG_DWORD, (LPCVOID)&cornerSize, sizeof(cornerSize));
     RegSetKeyValue(hChildKey, NULL, L"branding", REG_SZ, (LPCVOID)branding, wcslen(branding)*sizeof(WCHAR));
 
     RegCloseKey(hRootKey);
@@ -400,54 +409,56 @@ BOOL loadSettings() {
 
     DWORD size = sizeof(DWORD);
     if(disposition == REG_OPENED_EXISTING_KEY) {
-        RegGetValue(hChildKey, NULL, L"keyStrokeDelay", RRF_RT_DWORD, NULL, &keyStrokeDelay, &size);
-        RegGetValue(hChildKey, NULL, L"lingerTime", RRF_RT_DWORD, NULL, &lingerTime, &size);
-        RegGetValue(hChildKey, NULL, L"fadeDuration", RRF_RT_DWORD, NULL, &fadeDuration, &size);
+        RegGetValue(hChildKey, NULL, L"keyStrokeDelay", RRF_RT_DWORD, NULL, &labelSettings.keyStrokeDelay, &size);
+        RegGetValue(hChildKey, NULL, L"lingerTime", RRF_RT_DWORD, NULL, &labelSettings.lingerTime, &size);
+        RegGetValue(hChildKey, NULL, L"fadeDuration", RRF_RT_DWORD, NULL, &labelSettings.fadeDuration, &size);
+        RegGetValue(hChildKey, NULL, L"bgColor", RRF_RT_DWORD, NULL, &labelSettings.bgColor, &size);
+        RegGetValue(hChildKey, NULL, L"textColor", RRF_RT_DWORD, NULL, &labelSettings.textColor, &size);
+        RegGetValue(hChildKey, NULL, L"bgOpacity", RRF_RT_DWORD, NULL, &labelSettings.bgOpacity, &size);
+        RegGetValue(hChildKey, NULL, L"textOpacity", RRF_RT_DWORD, NULL, &labelSettings.textOpacity, &size);
+        RegGetValue(hChildKey, NULL, L"borderOpacity", RRF_RT_DWORD, NULL, &labelSettings.borderOpacity, &size);
+        RegGetValue(hChildKey, NULL, L"borderColor", RRF_RT_DWORD, NULL, &labelSettings.borderColor, &size);
+        RegGetValue(hChildKey, NULL, L"borderSize", RRF_RT_DWORD, NULL, &labelSettings.borderSize, &size);
+        RegGetValue(hChildKey, NULL, L"cornerSize", RRF_RT_DWORD, NULL, &labelSettings.cornerSize, &size);
         RegGetValue(hChildKey, NULL, L"labelSpacing", RRF_RT_DWORD, NULL, &labelSpacing, &size);
-        RegGetValue(hChildKey, NULL, L"bgColor", RRF_RT_DWORD, NULL, &bgColor, &size);
-        RegGetValue(hChildKey, NULL, L"textColor", RRF_RT_DWORD, NULL, &textColor, &size);
-        RegGetValue(hChildKey, NULL, L"bgOpacity", RRF_RT_DWORD, NULL, &bgOpacity, &size);
-        RegGetValue(hChildKey, NULL, L"textOpacity", RRF_RT_DWORD, NULL, &textOpacity, &size);
-        RegGetValue(hChildKey, NULL, L"borderOpacity", RRF_RT_DWORD, NULL, &borderOpacity, &size);
         RegGetValue(hChildKey, NULL, L"tcModifiers", RRF_RT_DWORD, NULL, &tcModifiers, &size);
         RegGetValue(hChildKey, NULL, L"tcKey", RRF_RT_DWORD, NULL, &tcKey, &size);
-        RegGetValue(hChildKey, NULL, L"borderColor", RRF_RT_DWORD, NULL, &borderColor, &size);
-        RegGetValue(hChildKey, NULL, L"borderSize", RRF_RT_DWORD, NULL, &borderSize, &size);
-        RegGetValue(hChildKey, NULL, L"cornerSize", RRF_RT_DWORD, NULL, &cornerSize, &size);
         size = 256;
         RegGetValue(hChildKey, NULL, L"branding", RRF_RT_REG_SZ, NULL, branding, &size);
 
-        size = sizeof(labelFont);
-        RegGetValue(hChildKey, NULL, L"labelFont", RRF_RT_REG_BINARY, NULL, &labelFont, &size);
+        size = sizeof(labelSettings.labelFont);
+        RegGetValue(hChildKey, NULL, L"labelFont", RRF_RT_REG_BINARY, NULL, &labelSettings.labelFont, &size);
     } else {
         saveSettings();
     }
 
     RegCloseKey(hRootKey);
     RegCloseKey(hChildKey);
+    previewLabelSettings = labelSettings;
     return res;
 }
 void renderSettingsData(HWND hwndDlg) {
     WCHAR tmp[256];
-    swprintf(tmp, 256, L"%d", keyStrokeDelay);
+    swprintf(tmp, 256, L"%d", previewLabelSettings.keyStrokeDelay);
     SetDlgItemText(hwndDlg, IDC_KEYSTROKEDELAY, tmp);
-    swprintf(tmp, 256, L"%d", lingerTime);
+    swprintf(tmp, 256, L"%d", previewLabelSettings.lingerTime);
     SetDlgItemText(hwndDlg, IDC_LINGERTIME, tmp);
-    swprintf(tmp, 256, L"%d", fadeDuration);
+    swprintf(tmp, 256, L"%d", previewLabelSettings.fadeDuration);
     SetDlgItemText(hwndDlg, IDC_FADEDURATION, tmp);
+    swprintf(tmp, 256, L"%d", previewLabelSettings.bgOpacity);
+    SetDlgItemText(hwndDlg, IDC_BGOPACITY, tmp);
+    swprintf(tmp, 256, L"%d", previewLabelSettings.textOpacity);
+    SetDlgItemText(hwndDlg, IDC_TEXTOPACITY, tmp);
+    swprintf(tmp, 256, L"%d", previewLabelSettings.borderOpacity);
+    SetDlgItemText(hwndDlg, IDC_BORDEROPACITY, tmp);
+    swprintf(tmp, 256, L"%d", previewLabelSettings.borderSize);
+    SetDlgItemText(hwndDlg, IDC_BORDERSIZE, tmp);
+    swprintf(tmp, 256, L"%d", previewLabelSettings.cornerSize);
+    SetDlgItemText(hwndDlg, IDC_CORNERSIZE, tmp);
+
     swprintf(tmp, 256, L"%d", labelSpacing);
     SetDlgItemText(hwndDlg, IDC_LABELSPACING, tmp);
-    swprintf(tmp, 256, L"%d", bgOpacity);
-    SetDlgItemText(hwndDlg, IDC_BGOPACITY, tmp);
-    swprintf(tmp, 256, L"%d", textOpacity);
-    SetDlgItemText(hwndDlg, IDC_TEXTOPACITY, tmp);
-    swprintf(tmp, 256, L"%d", borderOpacity);
-    SetDlgItemText(hwndDlg, IDC_BORDEROPACITY, tmp);
-    swprintf(tmp, 256, L"%d", borderSize);
-    SetDlgItemText(hwndDlg, IDC_BORDERSIZE, tmp);
-    swprintf(tmp, 256, L"%d", cornerSize);
     SetDlgItemText(hwndDlg, IDC_BRANDING, branding);
-    SetDlgItemText(hwndDlg, IDC_CORNERSIZE, tmp);
     CheckDlgButton(hwndDlg, IDC_MODCTRL, (tcModifiers & MOD_CONTROL) ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_MODALT, (tcModifiers & MOD_ALT) ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_MODSHIFT, (tcModifiers & MOD_SHIFT) ? BST_CHECKED : BST_UNCHECKED);
@@ -455,6 +466,87 @@ void renderSettingsData(HWND hwndDlg) {
     swprintf(tmp, 256, L"%c", MapVirtualKey(tcKey, MAPVK_VK_TO_CHAR));
     SetDlgItemText(hwndDlg, IDC_TCKEY, tmp);
 }
+void getLabelSettings(HWND hwndDlg, LabelSettings &lblSettings) {
+    WCHAR tmp[256];
+    GetDlgItemText(hwndDlg, IDC_KEYSTROKEDELAY, tmp, 256);
+    lblSettings.keyStrokeDelay = _wtoi(tmp);
+    GetDlgItemText(hwndDlg, IDC_LINGERTIME, tmp, 256);
+    lblSettings.lingerTime = _wtoi(tmp);
+    GetDlgItemText(hwndDlg, IDC_FADEDURATION, tmp, 256);
+    lblSettings.fadeDuration = _wtoi(tmp);
+    GetDlgItemText(hwndDlg, IDC_BGOPACITY, tmp, 256);
+    lblSettings.bgOpacity = _wtoi(tmp);
+    GetDlgItemText(hwndDlg, IDC_TEXTOPACITY, tmp, 256);
+    lblSettings.textOpacity = _wtoi(tmp);
+    GetDlgItemText(hwndDlg, IDC_BORDEROPACITY, tmp, 256);
+    lblSettings.borderOpacity = _wtoi(tmp);
+    GetDlgItemText(hwndDlg, IDC_BORDERSIZE, tmp, 256);
+    lblSettings.borderSize = _wtoi(tmp);
+    GetDlgItemText(hwndDlg, IDC_CORNERSIZE, tmp, 256);
+    lblSettings.cornerSize = _wtoi(tmp);
+    lblSettings.cornerSize = (lblSettings.cornerSize - lblSettings.borderSize > 0) ? lblSettings.cornerSize : lblSettings.borderSize + 1;
+}
+DWORD previewTime = 0;
+static void previewLabel() {
+    RECT rt = {12, 80, 222, 270};
+
+    getLabelSettings(hDlgSettings, previewLabelSettings);
+    DWORD mg = previewLabelSettings.lingerTime+previewLabelSettings.fadeDuration+600;
+    double r;
+    if(previewTime == 0 || previewTime > mg) {
+        previewTime = mg;
+    }
+    if(previewTime > mg-600) {
+        previewTime -= 100;
+        r = 0;
+    }
+    else if(previewTime > previewLabelSettings.fadeDuration) {
+        r = 1;
+        previewTime -= 100;
+    } else if(previewTime > 0) {
+        previewTime -= 100;
+        r = 1.0*previewTime/previewLabelSettings.fadeDuration;
+    }
+    HDC hdc = GetDC(hDlgSettings);
+    RectF rc(0, 0, (REAL)rt.right-rt.left, (REAL)rt.bottom-rt.top);
+    HDC memDC = ::CreateCompatibleDC(hdc);
+    HBITMAP memBitmap = ::CreateCompatibleBitmap(hdc, (int)rc.Width, (int)rc.Height);
+    ::SelectObject(memDC,memBitmap);
+    Graphics g(memDC);
+    //g.SetClip(rc);
+    g.SetSmoothingMode(SmoothingModeAntiAlias);
+    g.SetTextRenderingHint(TextRenderingHintAntiAlias);
+    //g.Clear(Color::Color(200, 0x7f,0,0x8f));
+
+    WCHAR text[] = L"BH";
+    HFONT hFont = CreateFontIndirect(&previewLabelSettings.labelFont);
+    HFONT hFontOld = (HFONT)SelectObject(memDC, hFont);
+    DeleteObject(hFontOld);
+    Font font(memDC, hFont);
+
+    PointF origin(rc.X+previewLabelSettings.borderSize, rc.Y+previewLabelSettings.borderSize);
+    g.MeasureString(text, 2, &font, origin, &rc);
+
+    int bgAlpha = (int)(r*previewLabelSettings.bgOpacity), textAlpha = (int)(r*previewLabelSettings.textOpacity), borderAlpha = (int)(r*previewLabelSettings.borderOpacity);
+    GraphicsPath path;
+    REAL dx = rc.Width - previewLabelSettings.cornerSize, dy = rc.Height - previewLabelSettings.cornerSize;
+    path.AddArc(rc.X, rc.Y, (REAL)previewLabelSettings.cornerSize, (REAL)previewLabelSettings.cornerSize, 170, 90);
+    path.AddArc(rc.X + dx, rc.Y, (REAL)previewLabelSettings.cornerSize, (REAL)previewLabelSettings.cornerSize, 270, 90);
+    path.AddArc(rc.X + dx, rc.Y + dy, (REAL)previewLabelSettings.cornerSize, (REAL)previewLabelSettings.cornerSize, 0, 90);
+    path.AddArc(rc.X, rc.Y + dy, (REAL)previewLabelSettings.cornerSize, (REAL)previewLabelSettings.cornerSize, 90, 90);
+    path.AddLine(rc.X, rc.Y + dy, rc.X, rc.Y + previewLabelSettings.cornerSize/2);
+    Pen penPlus(Color::Color(BR(borderAlpha, previewLabelSettings.borderColor)), previewLabelSettings.borderSize+0.0f);
+    SolidBrush brushPlus(Color::Color(BR(bgAlpha, previewLabelSettings.bgColor)));
+    g.DrawPath(&penPlus, &path);
+    g.FillPath(&brushPlus, &path);
+
+    SolidBrush textBrushPlus(Color(BR(textAlpha, previewLabelSettings.textColor)));
+    g.DrawString(text, wcslen(text), &font, origin, &textBrushPlus);
+    BitBlt(hdc, rt.left, rt.top, rt.right-rt.left, rt.bottom-rt.top, memDC, 0,0, SRCCOPY);
+    DeleteDC(memDC);
+    ReleaseDC(hDlgSettings, hdc);
+}
+
 BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     WCHAR tmp[256];
@@ -492,7 +584,7 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                         cf.lStructSize    = sizeof (CHOOSEFONT) ;
                         cf.hwndOwner      = hwndDlg ;
                         cf.hDC            = NULL ;
-                        cf.lpLogFont      = &labelFont ;
+                        cf.lpLogFont      = &previewLabelSettings.labelFont ;
                         cf.iPointSize     = 0 ;
                         cf.Flags          = CF_INITTOLOGFONTSTRUCT | CF_SCREENFONTS | CF_EFFECTS ;
                         cf.rgbColors      = 0 ;
@@ -512,43 +604,27 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     }
                     return TRUE;
                 case IDC_TEXTCOLOR:
-                    if( ColorDialog(hwndDlg, textColor) ) {
+                    if( ColorDialog(hwndDlg, previewLabelSettings.textColor) ) {
                         updateMainWindow();
                         saveSettings();
                     }
                     return TRUE;
                 case IDC_BGCOLOR:
-                    if( ColorDialog(hwndDlg, bgColor) ) {
+                    if( ColorDialog(hwndDlg, previewLabelSettings.bgColor) ) {
                         updateMainWindow();
                         saveSettings();
                     }
                     return TRUE;
                 case IDC_BORDERCOLOR:
-                    if( ColorDialog(hwndDlg, borderColor) ) {
+                    if( ColorDialog(hwndDlg, previewLabelSettings.borderColor) ) {
                         updateMainWindow();
                         saveSettings();
                     }
                     return TRUE;
                 case IDOK:
-                    GetDlgItemText(hwndDlg, IDC_KEYSTROKEDELAY, tmp, 256);
-                    keyStrokeDelay = _wtoi(tmp);
-                    GetDlgItemText(hwndDlg, IDC_LINGERTIME, tmp, 256);
-                    lingerTime = _wtoi(tmp);
-                    GetDlgItemText(hwndDlg, IDC_FADEDURATION, tmp, 256);
-                    fadeDuration = _wtoi(tmp);
+                    labelSettings = previewLabelSettings;
                     GetDlgItemText(hwndDlg, IDC_LABELSPACING, tmp, 256);
                     labelSpacing = _wtoi(tmp);
-                    GetDlgItemText(hwndDlg, IDC_BGOPACITY, tmp, 256);
-                    bgOpacity = _wtoi(tmp);
-                    GetDlgItemText(hwndDlg, IDC_TEXTOPACITY, tmp, 256);
-                    textOpacity = _wtoi(tmp);
-                    GetDlgItemText(hwndDlg, IDC_BORDEROPACITY, tmp, 256);
-                    borderOpacity = _wtoi(tmp);
-                    GetDlgItemText(hwndDlg, IDC_BORDERSIZE, tmp, 256);
-                    borderSize = _wtoi(tmp);
-                    GetDlgItemText(hwndDlg, IDC_CORNERSIZE, tmp, 256);
-                    cornerSize = _wtoi(tmp);
-                    cornerSize = (cornerSize - borderSize > 0) ? cornerSize : borderSize + 1;
                     GetDlgItemText(hwndDlg, IDC_BRANDING, branding, 256);
                     tcModifiers = 0;
                     if(BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MODCTRL)) {
@@ -576,6 +652,7 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                 case IDCANCEL:
                     EndDialog(hwndDlg, wParam);
                     SetWindowLong(hMainWnd, GWL_EXSTYLE, GetWindowLong(hMainWnd, GWL_EXSTYLE)| WS_EX_TRANSPARENT);
+                    previewTimer.Stop();
                     return TRUE;
             }
     }
@@ -669,8 +746,11 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
                 switch ( LOWORD( wParam ) )
                 {
                     case MENU_CONFIG:
+                        CopyMemory(&previewLabelSettings, &labelSettings, sizeof(previewLabelSettings));
                         renderSettingsData(hDlgSettings);
                         ShowWindow(hDlgSettings, SW_SHOW);
+                        SetForegroundWindow(hDlgSettings);
+                        previewTimer.Start(100);
                         SetWindowLong(hMainWnd, GWL_EXSTYLE, GetWindowLong(hMainWnd, GWL_EXSTYLE)& ~WS_EX_TRANSPARENT);
                         break;
                     case MENU_RESTORE:
@@ -778,7 +858,7 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
 
     updateMainWindow();
     ShowWindow(hMainWnd, SW_SHOW);
-    hDlgSettings = CreateDialog(hThisInst, MAKEINTRESOURCE(IDD_DLGSETTINGS), hMainWnd, (DLGPROC)SettingsWndProc);
+    hDlgSettings = CreateDialog(hThisInst, MAKEINTRESOURCE(IDD_DLGSETTINGS), NULL, (DLGPROC)SettingsWndProc);
     HFONT hlabelFont = CreateFont(20,10,0,0,FW_BLACK,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_OUTLINE_PRECIS,
                 CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY, VARIABLE_PITCH,TEXT("Arial"));
     HWND hlink = GetDlgItem(hDlgSettings, IDC_SYSLINK1);
@@ -786,6 +866,7 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
 
     showTimer.OnTimedEvent = startFade;
     showTimer.Start(100);
+    previewTimer.OnTimedEvent = previewLabel;
 
     kbdhook = SetWindowsHookEx(WH_KEYBOARD_LL, LLKeyboardProc, hThisInst, NULL);
 
