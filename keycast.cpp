@@ -27,7 +27,6 @@ struct KeyLabel {
     WCHAR *text;
     DWORD length;
     DWORD time;
-    double alpha;
     KeyLabel() {
         text = textBuffer;
         length = 0;
@@ -96,6 +95,49 @@ Font * fontPlus = NULL;
 #define MENU_CONFIG    32
 #define MENU_EXIT      33
 #define MENU_RESTORE      34
+void stamp(HWND hwnd, LPCWSTR text) {
+    RECT rt;
+    GetWindowRect(hwnd,&rt);
+    HDC hdc = GetDC(hwnd);
+    HDC memDC = ::CreateCompatibleDC(hdc);
+    HBITMAP memBitmap = ::CreateCompatibleBitmap(hdc, desktopRect.right, desktopRect.bottom);
+    ::SelectObject(memDC,memBitmap);
+    Graphics g(memDC);
+    g.SetSmoothingMode(SmoothingModeAntiAlias);
+    g.SetTextRenderingHint(TextRenderingHintAntiAlias);
+    g.Clear(Color::Color(0, 0x7f,0,0x8f));
+
+    RectF rc((REAL)labelSettings.borderSize, (REAL)labelSettings.borderSize, 0.0, 0.0);
+    SizeF stringSize, layoutSize((REAL)desktopRect.right-2*labelSettings.borderSize, (REAL)desktopRect.bottom-2*labelSettings.borderSize);
+    StringFormat format;
+    format.SetAlignment(StringAlignmentCenter);
+    g.MeasureString(text, wcslen(text), fontPlus, layoutSize, &format, &stringSize);
+    rc.Width = stringSize.Width;
+    rc.Height = stringSize.Height;
+    SIZE wndSize = {2*labelSettings.borderSize+(LONG)rc.Width, 2*labelSettings.borderSize+(LONG)rc.Height};
+    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, wndSize.cx, wndSize.cy, SWP_NOMOVE);
+
+    SolidBrush bgBrush(Color::Color(0xaf007cfe));
+    g.FillRectangle(&bgBrush, rc);
+    SolidBrush textBrushPlus(Color(0xaf303030));
+    g.DrawString(text, wcslen(text), fontPlus, rc, &format, &textBrushPlus);
+    SolidBrush brushPlus(Color::Color(0xaffefefe));
+    rc.X += 2;
+    rc.Y += 2;
+    g.DrawString(text, wcslen(text), fontPlus, rc, &format, &brushPlus);
+
+    POINT ptSrc = {0, 0};
+    POINT ptDst = {rt.left, rt.top};
+    BLENDFUNCTION blendFunction;
+    blendFunction.AlphaFormat = AC_SRC_ALPHA;
+    blendFunction.BlendFlags = 0;
+    blendFunction.BlendOp = AC_SRC_OVER;
+    blendFunction.SourceConstantAlpha = 255;
+    ::UpdateLayeredWindow(hwnd,hdc,&ptDst,&wndSize,memDC,&ptSrc,0,&blendFunction,2);
+    ::DeleteDC(memDC);
+    ::DeleteObject(memBitmap);
+    ReleaseDC(hwnd, hdc);
+}
 void updateLayeredWindow(HWND hwnd) {
     RECT rt;
     GetWindowRect(hwnd,&rt);
@@ -110,12 +152,7 @@ void updateLayeredWindow(HWND hwnd) {
     blendFunction.SourceConstantAlpha = 255;
     HDC hdcBuf = g->GetHDC();
     HDC hdc = GetDC(hwnd);
-    int i = 0;
-    BOOL ret = FALSE;
-    while(i<5 && !ret) {
-        ret = ::UpdateLayeredWindow(hwnd,hdc,&ptDst,&wndSize,hdcBuf,&ptSrc,0,&blendFunction,2);
-        i++;
-    }
+    ::UpdateLayeredWindow(hwnd,hdc,&ptDst,&wndSize,hdcBuf,&ptSrc,0,&blendFunction,2);
     ReleaseDC(hwnd, hdc);
     g->ReleaseHDC(hdcBuf);
 }
@@ -136,9 +173,9 @@ void updateLabel(int i) {
         g->MeasureString(keyLabels[i].text, keyLabels[i].length, fontPlus, origin, &rc);
         rc.Width = (rc.Width < labelSettings.cornerSize) ? labelSettings.cornerSize : rc.Width;
         rc.Height = (rc.Height < labelSettings.cornerSize) ? labelSettings.cornerSize : rc.Height;
-        keyLabels[i].alpha = 1.0*keyLabels[i].time/labelSettings.fadeDuration;
-        keyLabels[i].alpha = (keyLabels[i].alpha > 1.0) ? 1.0 : keyLabels[i].alpha;
-        int bgAlpha = (int)(keyLabels[i].alpha*labelSettings.bgOpacity), textAlpha = (int)(keyLabels[i].alpha*labelSettings.textOpacity), borderAlpha = (int)(keyLabels[i].alpha*labelSettings.borderOpacity);
+        double r = 1.0*keyLabels[i].time/labelSettings.fadeDuration;
+        r = (r > 1.0) ? 1.0 : r;
+        int bgAlpha = (int)(r*labelSettings.bgOpacity), textAlpha = (int)(r*labelSettings.textOpacity), borderAlpha = (int)(r*labelSettings.borderOpacity);
         GraphicsPath path;
         REAL dx = rc.Width - labelSettings.cornerSize, dy = rc.Height - labelSettings.cornerSize;
         path.AddArc(rc.X, rc.Y, (REAL)labelSettings.cornerSize, (REAL)labelSettings.cornerSize, 170, 90);
@@ -170,10 +207,13 @@ static void startFade() {
     for(i = 0; i < labelCount; i++) {
         if(keyLabels[i].time > labelSettings.fadeDuration) {
             keyLabels[i].time -= 100;
-        } else if(keyLabels[i].time > 0 || keyLabels[i].alpha > 0.0) {
+        } else if(keyLabels[i].time > 0) {
             keyLabels[i].time -= 100;
             updateLabel(i);
             dirty = TRUE;
+        } else if(keyLabels[i].length){
+            eraseLabel(i);
+            keyLabels[i].length = 0;
         }
     }
     if(dirty) {
@@ -218,6 +258,8 @@ void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
         if(keyLabels[labelCount-1].text+newLen >= textBufferEnd) {
             keyLabels[labelCount-1].text = textBuffer;
         }
+        //swprintf(branding, BRANDINGMAX, L"%0x", keyLabels[labelCount-1].text);
+        //stamp(hWndStamp, branding);
         wcscpy_s(keyLabels[labelCount-1].text, textBufferEnd-keyLabels[labelCount-1].text, text);
         keyLabels[labelCount-1].length = newLen;
 
@@ -277,49 +319,6 @@ BOOL ColorDialog ( HWND hWnd, COLORREF &clr ) {
         clr = dlgColor.rgbResult;
     }
     return TRUE;
-}
-void stamp(HWND hwnd, LPCWSTR text) {
-    RECT rt;
-    GetWindowRect(hwnd,&rt);
-    HDC hdc = GetDC(hwnd);
-    HDC memDC = ::CreateCompatibleDC(hdc);
-    HBITMAP memBitmap = ::CreateCompatibleBitmap(hdc, desktopRect.right, desktopRect.bottom);
-    ::SelectObject(memDC,memBitmap);
-    Graphics g(memDC);
-    g.SetSmoothingMode(SmoothingModeAntiAlias);
-    g.SetTextRenderingHint(TextRenderingHintAntiAlias);
-    g.Clear(Color::Color(0, 0x7f,0,0x8f));
-
-    RectF rc((REAL)labelSettings.borderSize, (REAL)labelSettings.borderSize, 0.0, 0.0);
-    SizeF stringSize, layoutSize((REAL)desktopRect.right-2*labelSettings.borderSize, (REAL)desktopRect.bottom-2*labelSettings.borderSize);
-    StringFormat format;
-    format.SetAlignment(StringAlignmentCenter);
-    g.MeasureString(text, wcslen(text), fontPlus, layoutSize, &format, &stringSize);
-    rc.Width = stringSize.Width;
-    rc.Height = stringSize.Height;
-    SIZE wndSize = {2*labelSettings.borderSize+(LONG)rc.Width, 2*labelSettings.borderSize+(LONG)rc.Height};
-    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, wndSize.cx, wndSize.cy, SWP_NOMOVE);
-
-    SolidBrush bgBrush(Color::Color(0xaf007cfe));
-    g.FillRectangle(&bgBrush, rc);
-    SolidBrush textBrushPlus(Color(0xaf303030));
-    g.DrawString(text, wcslen(text), fontPlus, rc, &format, &textBrushPlus);
-    SolidBrush brushPlus(Color::Color(0xaffefefe));
-    rc.X += 2;
-    rc.Y += 2;
-    g.DrawString(text, wcslen(text), fontPlus, rc, &format, &brushPlus);
-
-    POINT ptSrc = {0, 0};
-    POINT ptDst = {rt.left, rt.top};
-    BLENDFUNCTION blendFunction;
-    blendFunction.AlphaFormat = AC_SRC_ALPHA;
-    blendFunction.BlendFlags = 0;
-    blendFunction.BlendOp = AC_SRC_OVER;
-    blendFunction.SourceConstantAlpha = 255;
-    ::UpdateLayeredWindow(hwnd,hdc,&ptDst,&wndSize,memDC,&ptSrc,0,&blendFunction,2);
-    ::DeleteDC(memDC);
-    ::DeleteObject(memBitmap);
-    ReleaseDC(hwnd, hdc);
 }
 void updateMainWindow() {
     HDC hdc = GetDC(hMainWnd);
@@ -394,7 +393,7 @@ BOOL saveSettings() {
     RegSetKeyValue(hChildKey, NULL, L"labelSpacing", REG_DWORD, (LPCVOID)&labelSpacing, sizeof(labelSpacing));
     RegSetKeyValue(hChildKey, NULL, L"tcModifiers", REG_DWORD, (LPCVOID)&tcModifiers, sizeof(tcModifiers));
     RegSetKeyValue(hChildKey, NULL, L"tcKey", REG_DWORD, (LPCVOID)&tcKey, sizeof(tcKey));
-    RegSetKeyValue(hChildKey, NULL, L"branding", REG_SZ, (LPCVOID)branding, sizeof(branding));
+    RegSetKeyValue(hChildKey, NULL, L"branding", REG_SZ, (LPCVOID)branding, (wcslen(branding)+1)*sizeof(WCHAR));
 
     RegCloseKey(hRootKey);
     RegCloseKey(hChildKey);
