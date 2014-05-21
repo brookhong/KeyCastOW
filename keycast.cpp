@@ -72,7 +72,8 @@ LabelSettings labelSettings, previewLabelSettings;
 DWORD labelSpacing;
 UINT tcModifiers = MOD_ALT;
 UINT tcKey = 0x42;      // 0x42 is 'b'
-WCHAR branding[256];
+#define BRANDINGMAX 256
+WCHAR branding[BRANDINGMAX];
 
 #define MAXLABELS 60
 KeyLabel keyLabels[MAXLABELS];
@@ -109,7 +110,12 @@ void updateLayeredWindow(HWND hwnd) {
     blendFunction.SourceConstantAlpha = 255;
     HDC hdcBuf = g->GetHDC();
     HDC hdc = GetDC(hwnd);
-    ::UpdateLayeredWindow(hwnd,hdc,&ptDst,&wndSize,hdcBuf,&ptSrc,0,&blendFunction,2);
+    int i = 0;
+    BOOL ret = FALSE;
+    while(i<5 && !ret) {
+        ret = ::UpdateLayeredWindow(hwnd,hdc,&ptDst,&wndSize,hdcBuf,&ptSrc,0,&blendFunction,2);
+        i++;
+    }
     ReleaseDC(hwnd, hdc);
     g->ReleaseHDC(hdcBuf);
 }
@@ -285,7 +291,7 @@ void stamp(HWND hwnd, LPCWSTR text) {
     g.Clear(Color::Color(0, 0x7f,0,0x8f));
 
     RectF rc((REAL)labelSettings.borderSize, (REAL)labelSettings.borderSize, 0.0, 0.0);
-    SizeF stringSize, layoutSize((REAL)desktopRect.right, (REAL)desktopRect.bottom);
+    SizeF stringSize, layoutSize((REAL)desktopRect.right-2*labelSettings.borderSize, (REAL)desktopRect.bottom-2*labelSettings.borderSize);
     StringFormat format;
     format.SetAlignment(StringAlignmentCenter);
     g.MeasureString(text, wcslen(text), fontPlus, layoutSize, &format, &stringSize);
@@ -354,7 +360,7 @@ void initSettings() {
     labelSettings.reset();
     previewLabelSettings.reset();
     labelSpacing = 30;
-    wcscpy_s(branding, 256, TEXT("Press any key to try, double click to configure."));
+    wcscpy_s(branding, BRANDINGMAX, TEXT("Press any key to try, double click to configure."));
     tcModifiers = MOD_ALT;
     tcKey = 0x42;
 }
@@ -388,7 +394,7 @@ BOOL saveSettings() {
     RegSetKeyValue(hChildKey, NULL, L"labelSpacing", REG_DWORD, (LPCVOID)&labelSpacing, sizeof(labelSpacing));
     RegSetKeyValue(hChildKey, NULL, L"tcModifiers", REG_DWORD, (LPCVOID)&tcModifiers, sizeof(tcModifiers));
     RegSetKeyValue(hChildKey, NULL, L"tcKey", REG_DWORD, (LPCVOID)&tcKey, sizeof(tcKey));
-    RegSetKeyValue(hChildKey, NULL, L"branding", REG_SZ, (LPCVOID)branding, wcslen(branding)*sizeof(WCHAR));
+    RegSetKeyValue(hChildKey, NULL, L"branding", REG_SZ, (LPCVOID)branding, sizeof(branding));
 
     RegCloseKey(hRootKey);
     RegCloseKey(hChildKey);
@@ -423,7 +429,7 @@ BOOL loadSettings() {
         RegGetValue(hChildKey, NULL, L"labelSpacing", RRF_RT_DWORD, NULL, &labelSpacing, &size);
         RegGetValue(hChildKey, NULL, L"tcModifiers", RRF_RT_DWORD, NULL, &tcModifiers, &size);
         RegGetValue(hChildKey, NULL, L"tcKey", RRF_RT_DWORD, NULL, &tcKey, &size);
-        size = 256;
+        size = sizeof(branding);
         RegGetValue(hChildKey, NULL, L"branding", RRF_RT_REG_SZ, NULL, branding, &size);
 
         size = sizeof(labelSettings.labelFont);
@@ -508,12 +514,13 @@ static void previewLabel() {
         r = 1.0*previewTime/previewLabelSettings.fadeDuration;
     }
     HDC hdc = GetDC(hDlgSettings);
-    RectF rc(0, 0, (REAL)rt.right-rt.left, (REAL)rt.bottom-rt.top);
+    int rtWidth = rt.right-rt.left;
+    int rtHeight = rt.bottom-rt.top;
+    RectF rc(0, 0, (REAL)rtWidth, (REAL)rtHeight);
     HDC memDC = ::CreateCompatibleDC(hdc);
     HBITMAP memBitmap = ::CreateCompatibleBitmap(hdc, (int)rc.Width, (int)rc.Height);
     ::SelectObject(memDC,memBitmap);
     Graphics g(memDC);
-    //g.SetClip(rc);
     g.SetSmoothingMode(SmoothingModeAntiAlias);
     g.SetTextRenderingHint(TextRenderingHintAntiAlias);
     //g.Clear(Color::Color(200, 0x7f,0,0x8f));
@@ -526,6 +533,11 @@ static void previewLabel() {
 
     PointF origin(rc.X+previewLabelSettings.borderSize, rc.Y+previewLabelSettings.borderSize);
     g.MeasureString(text, 2, &font, origin, &rc);
+
+    rc.X += (rtWidth-(int)rc.Width)/2-previewLabelSettings.borderSize;
+    rc.Y += (rtHeight-(int)rc.Height)/2-previewLabelSettings.borderSize;
+    origin.X = rc.X;
+    origin.Y = rc.Y;
 
     int bgAlpha = (int)(r*previewLabelSettings.bgOpacity), textAlpha = (int)(r*previewLabelSettings.textOpacity), borderAlpha = (int)(r*previewLabelSettings.borderOpacity);
     GraphicsPath path;
@@ -542,7 +554,7 @@ static void previewLabel() {
 
     SolidBrush textBrushPlus(Color(BR(textAlpha, previewLabelSettings.textColor)));
     g.DrawString(text, wcslen(text), &font, origin, &textBrushPlus);
-    BitBlt(hdc, rt.left, rt.top, rt.right-rt.left, rt.bottom-rt.top, memDC, 0,0, SRCCOPY);
+    BitBlt(hdc, rt.left, rt.top, rtWidth, rtHeight, memDC, 0,0, SRCCOPY);
     DeleteDC(memDC);
     ReleaseDC(hDlgSettings, hdc);
 }
@@ -625,7 +637,7 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     labelSettings = previewLabelSettings;
                     GetDlgItemText(hwndDlg, IDC_LABELSPACING, tmp, 256);
                     labelSpacing = _wtoi(tmp);
-                    GetDlgItemText(hwndDlg, IDC_BRANDING, branding, 256);
+                    GetDlgItemText(hwndDlg, IDC_BRANDING, branding, BRANDINGMAX);
                     tcModifiers = 0;
                     if(BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MODCTRL)) {
                         tcModifiers |= MOD_CONTROL;
