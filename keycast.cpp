@@ -73,6 +73,7 @@ UINT tcModifiers = MOD_ALT;
 UINT tcKey = 0x42;      // 0x42 is 'b'
 #define BRANDINGMAX 256
 WCHAR branding[BRANDINGMAX];
+POINT deskOrigin;
 
 #define MAXLABELS 60
 KeyLabel keyLabels[MAXLABELS];
@@ -115,7 +116,7 @@ void stamp(HWND hwnd, LPCWSTR text) {
     rc.Width = stringSize.Width;
     rc.Height = stringSize.Height;
     SIZE wndSize = {2*labelSettings.borderSize+(LONG)rc.Width, 2*labelSettings.borderSize+(LONG)rc.Height};
-    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, wndSize.cx, wndSize.cy, SWP_NOMOVE);
+    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, wndSize.cx, wndSize.cy, SWP_NOMOVE|SWP_NOACTIVATE);
 
     SolidBrush bgBrush(Color::Color(0xaf007cfe));
     g.FillRectangle(&bgBrush, rc);
@@ -139,11 +140,8 @@ void stamp(HWND hwnd, LPCWSTR text) {
     ReleaseDC(hwnd, hdc);
 }
 void updateLayeredWindow(HWND hwnd) {
-    RECT rt;
-    GetWindowRect(hwnd,&rt);
-    Rect rc(0, 0, rt.right-rt.left, rt.bottom-rt.top);
+    Rect rc(0, 0, desktopRect.right-desktopRect.left, desktopRect.bottom-desktopRect.top);
     POINT ptSrc = {0, 0};
-    POINT ptDst = {rt.left, rt.top};
     SIZE wndSize = {rc.Width, rc.Height};
     BLENDFUNCTION blendFunction;
     blendFunction.AlphaFormat = AC_SRC_ALPHA;
@@ -152,7 +150,7 @@ void updateLayeredWindow(HWND hwnd) {
     blendFunction.SourceConstantAlpha = 255;
     HDC hdcBuf = g->GetHDC();
     HDC hdc = GetDC(hwnd);
-    ::UpdateLayeredWindow(hwnd,hdc,&ptDst,&wndSize,hdcBuf,&ptSrc,0,&blendFunction,2);
+    ::UpdateLayeredWindow(hwnd,hdc,&ptSrc,&wndSize,hdcBuf,&ptSrc,0,&blendFunction,2);
     ReleaseDC(hwnd, hdc);
     g->ReleaseHDC(hdcBuf);
 }
@@ -169,12 +167,12 @@ void updateLabel(int i) {
 
     if(keyLabels[i].length > 0) {
         RectF &rc = keyLabels[i].rect;
+        REAL r = 1.0f*keyLabels[i].time/labelSettings.fadeDuration;
+        r = (r > 1.0f) ? 1.0f : r;
         PointF origin(rc.X, rc.Y);
         g->MeasureString(keyLabels[i].text, keyLabels[i].length, fontPlus, origin, &rc);
         rc.Width = (rc.Width < labelSettings.cornerSize) ? labelSettings.cornerSize : rc.Width;
         rc.Height = (rc.Height < labelSettings.cornerSize) ? labelSettings.cornerSize : rc.Height;
-        double r = 1.0*keyLabels[i].time/labelSettings.fadeDuration;
-        r = (r > 1.0) ? 1.0 : r;
         int bgAlpha = (int)(r*labelSettings.bgOpacity), textAlpha = (int)(r*labelSettings.textOpacity), borderAlpha = (int)(r*labelSettings.borderOpacity);
         GraphicsPath path;
         REAL dx = rc.Width - labelSettings.cornerSize, dy = rc.Height - labelSettings.cornerSize;
@@ -198,17 +196,18 @@ void updateLabel(int i) {
 }
 
 static int newStrokeCount = 0;
+#define SHOWTIMER_INTERVAL 100
 static void startFade() {
     if(newStrokeCount > 0) {
-        newStrokeCount -= 100;
+        newStrokeCount -= SHOWTIMER_INTERVAL;
     }
     DWORD i = 0;
     BOOL dirty = FALSE;
     for(i = 0; i < labelCount; i++) {
         if(keyLabels[i].time > labelSettings.fadeDuration) {
-            keyLabels[i].time -= 100;
+            keyLabels[i].time -= SHOWTIMER_INTERVAL;
         } else if(keyLabels[i].time > 0) {
-            keyLabels[i].time -= 100;
+            keyLabels[i].time -= SHOWTIMER_INTERVAL;
             updateLabel(i);
             dirty = TRUE;
         } else if(keyLabels[i].length){
@@ -232,9 +231,7 @@ bool outOfLine(LPCWSTR text) {
     RectF box;
     PointF origin(0, 0);
     g->MeasureString(keyLabels[labelCount-1].text, keyLabels[labelCount-1].length, fontPlus, origin, &box);
-    RECT r;
-    GetWindowRect(hMainWnd,&r);
-    return (r.left+box.Width+2*labelSettings.cornerSize+labelSettings.borderSize*2 >= desktopRect.right);
+    return (deskOrigin.x+box.Width+2*labelSettings.cornerSize+labelSettings.borderSize*2 >= desktopRect.right);
 }
 void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
     SetWindowPos(hMainWnd,HWND_TOPMOST,0,0,0,0,SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE);
@@ -336,15 +333,17 @@ void updateMainWindow() {
     g->MeasureString(L"\u263b - KeyCastOW OFF", 16, fontPlus, origin, &box);
     REAL unitH = box.Height+2*labelSettings.borderSize+labelSpacing;
     labelCount = (desktopRect.bottom - desktopRect.top) / (int)unitH;
-    SetWindowPos(hMainWnd, HWND_TOPMOST, desktopRect.right-(int)(box.Width+4*labelSettings.borderSize), 0, desktopRect.right, desktopRect.bottom, 0);
+    if(deskOrigin.x < 0) {
+        deskOrigin.x = desktopRect.right-(int)(box.Width+8*labelSettings.borderSize);
+    }
 
     if(labelCount > MAXLABELS)
         labelCount = MAXLABELS;
 
     g->Clear(Color::Color(0, 0x7f,0,0x8f));
     for(DWORD i = 0; i < labelCount; i ++) {
-        keyLabels[i].rect.X = (REAL)labelSettings.borderSize;
-        keyLabels[i].rect.Y = unitH*i;
+        keyLabels[i].rect.X = deskOrigin.x+(REAL)labelSettings.borderSize;
+        keyLabels[i].rect.Y = deskOrigin.y+unitH*i;
         if(keyLabels[i].time > labelSettings.lingerTime+labelSettings.fadeDuration) {
             keyLabels[i].time = labelSettings.lingerTime+labelSettings.fadeDuration;
         }
@@ -359,7 +358,9 @@ void initSettings() {
     labelSettings.reset();
     previewLabelSettings.reset();
     labelSpacing = 30;
-    wcscpy_s(branding, BRANDINGMAX, TEXT("Press any key to try, double click to configure."));
+    wcscpy_s(branding, BRANDINGMAX, TEXT("Hi there, press any key to try, double click to configure."));
+    deskOrigin.x = -1;
+    deskOrigin.y = 0;
     tcModifiers = MOD_ALT;
     tcKey = 0x42;
 }
@@ -391,6 +392,8 @@ BOOL saveSettings() {
     RegSetKeyValue(hChildKey, NULL, L"borderSize", REG_DWORD, (LPCVOID)&labelSettings.borderSize, sizeof(labelSettings.borderSize));
     RegSetKeyValue(hChildKey, NULL, L"cornerSize", REG_DWORD, (LPCVOID)&labelSettings.cornerSize, sizeof(labelSettings.cornerSize));
     RegSetKeyValue(hChildKey, NULL, L"labelSpacing", REG_DWORD, (LPCVOID)&labelSpacing, sizeof(labelSpacing));
+    RegSetKeyValue(hChildKey, NULL, L"offsetX", REG_DWORD, (LPCVOID)&deskOrigin.x, sizeof(deskOrigin.x));
+    RegSetKeyValue(hChildKey, NULL, L"offsetY", REG_DWORD, (LPCVOID)&deskOrigin.y, sizeof(deskOrigin.y));
     RegSetKeyValue(hChildKey, NULL, L"tcModifiers", REG_DWORD, (LPCVOID)&tcModifiers, sizeof(tcModifiers));
     RegSetKeyValue(hChildKey, NULL, L"tcKey", REG_DWORD, (LPCVOID)&tcKey, sizeof(tcKey));
     RegSetKeyValue(hChildKey, NULL, L"branding", REG_SZ, (LPCVOID)branding, (wcslen(branding)+1)*sizeof(WCHAR));
@@ -426,6 +429,8 @@ BOOL loadSettings() {
         RegGetValue(hChildKey, NULL, L"borderSize", RRF_RT_DWORD, NULL, &labelSettings.borderSize, &size);
         RegGetValue(hChildKey, NULL, L"cornerSize", RRF_RT_DWORD, NULL, &labelSettings.cornerSize, &size);
         RegGetValue(hChildKey, NULL, L"labelSpacing", RRF_RT_DWORD, NULL, &labelSpacing, &size);
+        RegGetValue(hChildKey, NULL, L"offsetX", RRF_RT_DWORD, NULL, &deskOrigin.x, &size);
+        RegGetValue(hChildKey, NULL, L"offsetY", RRF_RT_DWORD, NULL, &deskOrigin.y, &size);
         RegGetValue(hChildKey, NULL, L"tcModifiers", RRF_RT_DWORD, NULL, &tcModifiers, &size);
         RegGetValue(hChildKey, NULL, L"tcKey", RRF_RT_DWORD, NULL, &tcKey, &size);
         size = sizeof(branding);
@@ -463,6 +468,10 @@ void renderSettingsData(HWND hwndDlg) {
 
     swprintf(tmp, 256, L"%d", labelSpacing);
     SetDlgItemText(hwndDlg, IDC_LABELSPACING, tmp);
+    swprintf(tmp, 256, L"%d", deskOrigin.x);
+    SetDlgItemText(hwndDlg, IDC_OFFSETX, tmp);
+    swprintf(tmp, 256, L"%d", deskOrigin.y);
+    SetDlgItemText(hwndDlg, IDC_OFFSETY, tmp);
     SetDlgItemText(hwndDlg, IDC_BRANDING, branding);
     CheckDlgButton(hwndDlg, IDC_MODCTRL, (tcModifiers & MOD_CONTROL) ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_MODALT, (tcModifiers & MOD_ALT) ? BST_CHECKED : BST_UNCHECKED);
@@ -492,8 +501,9 @@ void getLabelSettings(HWND hwndDlg, LabelSettings &lblSettings) {
     lblSettings.cornerSize = (lblSettings.cornerSize - lblSettings.borderSize > 0) ? lblSettings.cornerSize : lblSettings.borderSize + 1;
 }
 DWORD previewTime = 0;
+#define PREVIEWTIMER_INTERVAL 100
 static void previewLabel() {
-    RECT rt = {12, 80, 222, 270};
+    RECT rt = {12, 50, 222, 230};
 
     getLabelSettings(hDlgSettings, previewLabelSettings);
     DWORD mg = previewLabelSettings.lingerTime+previewLabelSettings.fadeDuration+600;
@@ -502,14 +512,14 @@ static void previewLabel() {
         previewTime = mg;
     }
     if(previewTime > mg-600) {
-        previewTime -= 100;
+        previewTime -= PREVIEWTIMER_INTERVAL;
         r = 0;
     }
     else if(previewTime > previewLabelSettings.fadeDuration) {
         r = 1;
-        previewTime -= 100;
+        previewTime -= PREVIEWTIMER_INTERVAL;
     } else if(previewTime > 0) {
-        previewTime -= 100;
+        previewTime -= PREVIEWTIMER_INTERVAL;
         r = 1.0*previewTime/previewLabelSettings.fadeDuration;
     }
     HDC hdc = GetDC(hDlgSettings);
@@ -636,6 +646,10 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     labelSettings = previewLabelSettings;
                     GetDlgItemText(hwndDlg, IDC_LABELSPACING, tmp, 256);
                     labelSpacing = _wtoi(tmp);
+                    GetDlgItemText(hwndDlg, IDC_OFFSETX, tmp, 256);
+                    deskOrigin.x = _wtoi(tmp);
+                    GetDlgItemText(hwndDlg, IDC_OFFSETY, tmp, 256);
+                    deskOrigin.y = _wtoi(tmp);
                     GetDlgItemText(hwndDlg, IDC_BRANDING, branding, BRANDINGMAX);
                     tcModifiers = 0;
                     if(BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MODCTRL)) {
@@ -662,7 +676,6 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     saveSettings();
                 case IDCANCEL:
                     EndDialog(hwndDlg, wParam);
-                    SetWindowLong(hMainWnd, GWL_EXSTYLE, GetWindowLong(hMainWnd, GWL_EXSTYLE)| WS_EX_TRANSPARENT);
                     previewTimer.Stop();
                     return TRUE;
             }
@@ -697,7 +710,7 @@ LRESULT CALLBACK DraggableWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
             break;
         case WM_LBUTTONUP:
             ReleaseCapture();
-            showTimer.Start(100);
+            showTimer.Start(SHOWTIMER_INTERVAL);
             break;
         case WM_LBUTTONDBLCLK:
             SendMessage( hMainWnd, WM_COMMAND, MENU_CONFIG, 0 );
@@ -761,8 +774,7 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
                         renderSettingsData(hDlgSettings);
                         ShowWindow(hDlgSettings, SW_SHOW);
                         SetForegroundWindow(hDlgSettings);
-                        previewTimer.Start(100);
-                        SetWindowLong(hMainWnd, GWL_EXSTYLE, GetWindowLong(hMainWnd, GWL_EXSTYLE)& ~WS_EX_TRANSPARENT);
+                        previewTimer.Start(PREVIEWTIMER_INTERVAL);
                         break;
                     case MENU_RESTORE:
                         initSettings();
@@ -782,7 +794,7 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
             PostQuitMessage(0);
             break;
         default:
-            return DraggableWndProc(hWnd, message, wParam, lParam);
+            return DefWindowProc(hWnd, message, wParam, lParam);
     }
     return 0;
 }
@@ -826,13 +838,14 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         return 0;
     }
 
+    SystemParametersInfo(SPI_GETWORKAREA,NULL,&desktopRect,NULL);
     hMainWnd = CreateWindowEx(
             WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
             szWinName,
             szWinName,
             WS_POPUP,
             0, 0,            //X and Y position of window
-            0, 0,            //Width and height of window
+            desktopRect.right - desktopRect.left, desktopRect.bottom - desktopRect.top,            //Width and height of window
             NULL,
             NULL,
             hThisInst,
@@ -844,7 +857,6 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     }
 
     loadSettings();
-    SystemParametersInfo(SPI_GETWORKAREA,NULL,&desktopRect,NULL);
     MyRegisterClassEx(hThisInst, L"STAMP", DraggableWndProc);
     hWndStamp = CreateWindowEx(
             WS_EX_LAYERED | WS_EX_NOACTIVATE,
@@ -876,7 +888,7 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     SendMessage(hlink, WM_SETFONT, (WPARAM)hlabelFont, TRUE);
 
     showTimer.OnTimedEvent = startFade;
-    showTimer.Start(100);
+    showTimer.Start(SHOWTIMER_INTERVAL);
     previewTimer.OnTimedEvent = previewLabel;
 
     kbdhook = SetWindowsHookEx(WH_KEYBOARD_LL, LLKeyboardProc, hThisInst, NULL);
