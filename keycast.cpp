@@ -196,7 +196,7 @@ void updateLabel(int i) {
 }
 
 static int newStrokeCount = 0;
-#define SHOWTIMER_INTERVAL 100
+#define SHOWTIMER_INTERVAL 40
 static void startFade() {
     if(newStrokeCount > 0) {
         newStrokeCount -= SHOWTIMER_INTERVAL;
@@ -490,10 +490,13 @@ void getLabelSettings(HWND hwndDlg, LabelSettings &lblSettings) {
     lblSettings.fadeDuration = _wtoi(tmp);
     GetDlgItemText(hwndDlg, IDC_BGOPACITY, tmp, 256);
     lblSettings.bgOpacity = _wtoi(tmp);
+    lblSettings.bgOpacity = min(lblSettings.bgOpacity, 255);
     GetDlgItemText(hwndDlg, IDC_TEXTOPACITY, tmp, 256);
     lblSettings.textOpacity = _wtoi(tmp);
+    lblSettings.textOpacity = min(lblSettings.textOpacity, 255);
     GetDlgItemText(hwndDlg, IDC_BORDEROPACITY, tmp, 256);
     lblSettings.borderOpacity = _wtoi(tmp);
+    lblSettings.borderOpacity = min(lblSettings.borderOpacity, 255);
     GetDlgItemText(hwndDlg, IDC_BORDERSIZE, tmp, 256);
     lblSettings.borderSize = _wtoi(tmp);
     GetDlgItemText(hwndDlg, IDC_CORNERSIZE, tmp, 256);
@@ -501,7 +504,7 @@ void getLabelSettings(HWND hwndDlg, LabelSettings &lblSettings) {
     lblSettings.cornerSize = (lblSettings.cornerSize - lblSettings.borderSize > 0) ? lblSettings.cornerSize : lblSettings.borderSize + 1;
 }
 DWORD previewTime = 0;
-#define PREVIEWTIMER_INTERVAL 100
+#define PREVIEWTIMER_INTERVAL 5
 static void previewLabel() {
     RECT rt = {12, 50, 222, 230};
 
@@ -536,8 +539,7 @@ static void previewLabel() {
 
     WCHAR text[] = L"BH";
     HFONT hFont = CreateFontIndirect(&previewLabelSettings.labelFont);
-    HFONT hFontOld = (HFONT)SelectObject(memDC, hFont);
-    DeleteObject(hFontOld);
+    SelectObject(memDC, hFont);
     Font font(memDC, hFont);
 
     PointF origin(rc.X+previewLabelSettings.borderSize, rc.Y+previewLabelSettings.borderSize);
@@ -565,6 +567,8 @@ static void previewLabel() {
     g.DrawString(text, wcslen(text), &font, origin, &textBrushPlus);
     BitBlt(hdc, rt.left, rt.top, rtWidth, rtHeight, memDC, 0,0, SRCCOPY);
     DeleteDC(memDC);
+    DeleteObject(memBitmap);
+    DeleteObject(hFont);
     ReleaseDC(hDlgSettings, hdc);
 }
 
