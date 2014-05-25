@@ -49,7 +49,9 @@ struct LabelSettings {
         bgColor = RGB(75, 75, 75);
         textColor = RGB(255, 255, 255);
         borderColor = RGB(0, 128, 255);
-        bgOpacity = textOpacity = borderOpacity = 198;
+        bgOpacity = 127;
+        textOpacity = 255;
+        borderOpacity = 198;
         borderSize = 8;
         cornerSize = 16;
         memset(&labelFont, 0, sizeof(labelFont));
@@ -139,10 +141,14 @@ void stamp(HWND hwnd, LPCWSTR text) {
     ::DeleteObject(memBitmap);
     ReleaseDC(hwnd, hdc);
 }
-void updateLayeredWindow(HWND hwnd) {
-    Rect rc(0, 0, desktopRect.right-desktopRect.left, desktopRect.bottom-desktopRect.top);
+void updateLayeredWindow(HWND hwnd, POINT &ptDst, SIZE &wndSize) {
+#ifdef _DEBUG
+    //WCHAR tmp[256];
+    //swprintf(tmp, 256, L"%d-%d", wndSize.cx, wndSize.cy);
+    //stamp(hWndStamp, tmp);
+#endif
+
     POINT ptSrc = {0, 0};
-    SIZE wndSize = {rc.Width, rc.Height};
     BLENDFUNCTION blendFunction;
     blendFunction.AlphaFormat = AC_SRC_ALPHA;
     blendFunction.BlendFlags = 0;
@@ -150,7 +156,7 @@ void updateLayeredWindow(HWND hwnd) {
     blendFunction.SourceConstantAlpha = 255;
     HDC hdcBuf = g->GetHDC();
     HDC hdc = GetDC(hwnd);
-    ::UpdateLayeredWindow(hwnd,hdc,&ptSrc,&wndSize,hdcBuf,&ptSrc,0,&blendFunction,2);
+    ::UpdateLayeredWindow(hwnd,hdc,&ptDst,&wndSize,hdcBuf,&ptSrc,0,&blendFunction,2);
     ReleaseDC(hwnd, hdc);
     g->ReleaseHDC(hdcBuf);
 }
@@ -203,20 +209,25 @@ static void startFade() {
     }
     DWORD i = 0;
     BOOL dirty = FALSE;
+    SIZE wndSize = {0, desktopRect.bottom-deskOrigin.y};
     for(i = 0; i < labelCount; i++) {
+        RectF &rt = keyLabels[i].rect;
         if(keyLabels[i].time > labelSettings.fadeDuration) {
             keyLabels[i].time -= SHOWTIMER_INTERVAL;
+            wndSize.cx = max(wndSize.cx, (LONG)rt.Width+2*labelSettings.borderSize+1);
         } else if(keyLabels[i].time > 0) {
             keyLabels[i].time -= SHOWTIMER_INTERVAL;
             updateLabel(i);
             dirty = TRUE;
+            wndSize.cx = max(wndSize.cx, (LONG)rt.Width+2*labelSettings.borderSize+1);
         } else if(keyLabels[i].length){
             eraseLabel(i);
             keyLabels[i].length = 0;
+            wndSize.cx = max(wndSize.cx, (LONG)rt.Width+2*labelSettings.borderSize+1);
         }
     }
     if(dirty) {
-        updateLayeredWindow(hMainWnd);
+        updateLayeredWindow(hMainWnd, deskOrigin, wndSize);
     }
 }
 
@@ -236,8 +247,8 @@ bool outOfLine(LPCWSTR text) {
 void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
     SetWindowPos(hMainWnd,HWND_TOPMOST,0,0,0,0,SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE);
     size_t newLen = wcslen(text);
+    DWORD i;
     if(forceNewStroke || (newStrokeCount <= 0) || outOfLine(text)) {
-        DWORD i;
         for (i = 1; i < labelCount; i++) {
             if(keyLabels[i].time > 0) {
                 break;
@@ -279,7 +290,14 @@ void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
 
         newStrokeCount = labelSettings.keyStrokeDelay;
     }
-    updateLayeredWindow(hMainWnd);
+    SIZE wndSize = {0, desktopRect.bottom-deskOrigin.y};
+    for(i = 0; i < labelCount; i++) {
+        RectF &rt = keyLabels[i].rect;
+        if(keyLabels[i].time > 0 || keyLabels[i].length > 0) {
+            wndSize.cx = max(wndSize.cx, (LONG)rt.Width+2*labelSettings.borderSize+1);
+        }
+    }
+    updateLayeredWindow(hMainWnd, deskOrigin, wndSize);
 }
 
 BOOL ColorDialog ( HWND hWnd, COLORREF &clr ) {
@@ -342,8 +360,8 @@ void updateMainWindow() {
 
     g->Clear(Color::Color(0, 0x7f,0,0x8f));
     for(DWORD i = 0; i < labelCount; i ++) {
-        keyLabels[i].rect.X = deskOrigin.x+(REAL)labelSettings.borderSize;
-        keyLabels[i].rect.Y = deskOrigin.y+unitH*i;
+        keyLabels[i].rect.X = (REAL)labelSettings.borderSize;
+        keyLabels[i].rect.Y = unitH*i;
         if(keyLabels[i].time > labelSettings.lingerTime+labelSettings.fadeDuration) {
             keyLabels[i].time = labelSettings.lingerTime+labelSettings.fadeDuration;
         }
