@@ -82,8 +82,8 @@ struct Key specialKeys[] = {
     {0x87, L"F24"},
     {0x90, L"NUMLOCK"},
     {0x91, L"SCROLL"},
-    {0xA0, L"LSHIFT"},
-    {0xA1, L"RSHIFT"},
+    {0xA0, L"Shift"},
+    {0xA1, L"Shift"},
     {0xA2, L"Ctrl"},
     {0xA3, L"Ctrl"},
     {0xA4, L"Alt"},
@@ -133,6 +133,7 @@ struct Key specialKeys[] = {
 };
 size_t nSpecialKeys = sizeof(specialKeys) / sizeof(Key);
 
+extern BOOL visibleShift;
 HHOOK kbdhook;
 void showText(LPCWSTR text, BOOL forceNewStroke = FALSE);
 
@@ -149,7 +150,7 @@ LPCWSTR GetSymbolFromVK(UINT vk, UINT sc, BOOL mod) {
         }
     }
     if(ToAsciiEx(vk, sc, btKeyState, &Symbol, 0, hklLayout) == 1) {
-        if(mod && GetKeyState(VK_SHIFT) < 0) {
+        if(!visibleShift && mod && GetKeyState(VK_SHIFT) < 0) {
             // prefix "Shift - " only when Ctrl or Alt is hold (mod as TRUE)
             swprintf(symbol, 32, L"Shift - %c", (WCHAR)Symbol);
         } else {
@@ -183,7 +184,7 @@ LPCWSTR getModSpecialKey(UINT vk, BOOL mod = FALSE) {
     } else {
         WCHAR tmp[64];
         LPCWSTR sk = getSpecialKey(vk);
-        if(GetKeyState(VK_SHIFT) < 0) {
+        if(!visibleShift && GetKeyState(VK_SHIFT) < 0) {
             // prefix "Shift - "
             swprintf(tmp, 64, L"Shift - %s", sk);
             sk= tmp;
@@ -234,8 +235,9 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
         return CallNextHookEx(kbdhook, nCode, wp, lp);
 
     static BOOL fin = FALSE;
+    UINT spk = visibleShift ? 0xA0 : 0xA2;
     if(wp == WM_KEYUP || wp == WM_SYSKEYUP) {
-        if(k.vkCode >= 0xA2 && k.vkCode <= 0xA5 ||
+        if(k.vkCode >= spk && k.vkCode <= 0xA5 ||
                 k.vkCode == 0x5B || k.vkCode == 0x5C) {
             if(!fin && modifierkey[0] != '\0') {
                 // show Ctrl/Alt/Win keys only when they're not used as modifier.
@@ -246,7 +248,7 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
         }
     } else if(wp == WM_KEYDOWN || wp == WM_SYSKEYDOWN) {
         fin = FALSE;
-        if(k.vkCode >= 0xA2 && k.vkCode <= 0xA5 ||          // ctrl / alt
+        if(k.vkCode >= spk && k.vkCode <= 0xA5 ||          // ctrl / alt
                 k.vkCode == 0x5B || k.vkCode == 0x5C) {     // win
             LPCWSTR ck = getSpecialKey(k.vkCode);
             if(modifierkey[0] == '\0') {
