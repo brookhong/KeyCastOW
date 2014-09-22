@@ -30,7 +30,7 @@ struct Key specialKeys[] = {
     {0x1D, L"NONCONVERT"},
     {0x1E, L"ACCEPT"},
     {0x1F, L"MODECHANGE"},
-    {0x20, L"\u25ad"},              // space
+    {0x20, L"\u2517\u2501\u251b"},              // space
     {0x21, L"PRIOR"},
     {0x22, L"NEXT"},
     {0x23, L"END"},
@@ -134,6 +134,7 @@ struct Key specialKeys[] = {
 size_t nSpecialKeys = sizeof(specialKeys) / sizeof(Key);
 
 extern BOOL visibleShift;
+extern BOOL onlyCommandKeys;
 HHOOK kbdhook;
 void showText(LPCWSTR text, BOOL forceNewStroke = FALSE);
 
@@ -277,7 +278,9 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
                     swprintf(tmp, 64, L"<%s - %s>", modifierkey, theKey);
                     theKey = tmp;
                 }
-                showText(theKey, fin);
+                if(fin || !onlyCommandKeys) {
+                    showText(theKey, fin);
+                }
             }
         }
     }
