@@ -150,6 +150,7 @@ void updateLayeredWindow(HWND hwnd, POINT &ptDst, SIZE &wndSize) {
 #endif
 
     POINT ptSrc = {0, 0};
+    POINT ptDst1 = {ptDst.x, -ptDst.y};
     BLENDFUNCTION blendFunction;
     blendFunction.AlphaFormat = AC_SRC_ALPHA;
     blendFunction.BlendFlags = 0;
@@ -157,7 +158,7 @@ void updateLayeredWindow(HWND hwnd, POINT &ptDst, SIZE &wndSize) {
     blendFunction.SourceConstantAlpha = 255;
     HDC hdcBuf = g->GetHDC();
     HDC hdc = GetDC(hwnd);
-    ::UpdateLayeredWindow(hwnd,hdc,&ptDst,&wndSize,hdcBuf,&ptSrc,0,&blendFunction,2);
+    ::UpdateLayeredWindow(hwnd,hdc,&ptDst1,&wndSize,hdcBuf,&ptSrc,0,&blendFunction,2);
     ReleaseDC(hwnd, hdc);
     g->ReleaseHDC(hdcBuf);
 }
@@ -210,7 +211,7 @@ static void startFade() {
     }
     DWORD i = 0;
     BOOL dirty = FALSE;
-    SIZE wndSize = {0, desktopRect.bottom-deskOrigin.y};
+    SIZE wndSize = {0, desktopRect.bottom};
     for(i = 0; i < labelCount; i++) {
         RectF &rt = keyLabels[i].rect;
         if(keyLabels[i].time > labelSettings.fadeDuration) {
@@ -291,7 +292,7 @@ void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
 
         newStrokeCount = labelSettings.keyStrokeDelay;
     }
-    SIZE wndSize = {0, desktopRect.bottom-deskOrigin.y};
+    SIZE wndSize = {0, desktopRect.bottom};
     for(i = 0; i < labelCount; i++) {
         RectF &rt = keyLabels[i].rect;
         if(keyLabels[i].time > 0 || keyLabels[i].length > 0) {
