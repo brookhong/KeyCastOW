@@ -100,6 +100,14 @@ Font * fontPlus = NULL;
 #define MENU_CONFIG    32
 #define MENU_EXIT      33
 #define MENU_RESTORE      34
+#ifdef _DEBUG
+#include <sstream>
+void log(char * fileName, const std::stringstream & line) {
+    FILE *stream = fopen(fileName,"a");
+    fprintf(stream,"%s",line.str().c_str());
+    fclose(stream);
+}
+#endif
 void stamp(HWND hwnd, LPCWSTR text) {
     RECT rt;
     GetWindowRect(hwnd,&rt);
@@ -245,6 +253,12 @@ bool outOfLine(LPCWSTR text) {
     RectF box;
     PointF origin(0, 0);
     g->MeasureString(keyLabels[labelCount-1].text, keyLabels[labelCount-1].length, fontPlus, origin, &box);
+#ifdef _DEBUG
+    std::stringstream line;
+    line << "x:" << deskOrigin.x << ";";
+    line << "w:" << desktopRect.right << "\n";
+    log("d:\\KeyCastOW.log", line);
+#endif
     return (deskOrigin.x+box.Width+2*labelSettings.cornerSize+labelSettings.borderSize*2 >= desktopRect.right);
 }
 void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
@@ -354,8 +368,9 @@ void updateMainWindow() {
     g->MeasureString(L"\u263b - KeyCastOW OFF", 16, fontPlus, origin, &box);
     REAL unitH = box.Height+2*labelSettings.borderSize+labelSpacing;
     labelCount = (desktopRect.bottom - desktopRect.top) / (int)unitH;
-    if(deskOrigin.x < 0) {
-        deskOrigin.x = desktopRect.right-(int)(box.Width+8*labelSettings.borderSize);
+    int maxW = desktopRect.right-(int)(box.Width+8*labelSettings.borderSize);
+    if(deskOrigin.x < 0 || deskOrigin.x > maxW) {
+        deskOrigin.x = maxW;
     }
 
     if(labelCount > MAXLABELS)
@@ -827,6 +842,11 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
             break;
         case WM_DESTROY:
             PostQuitMessage(0);
+            break;
+        case WM_DISPLAYCHANGE:
+            SystemParametersInfo(SPI_GETWORKAREA,NULL,&desktopRect,NULL);
+            deskOrigin.x = -1;
+            updateMainWindow();
             break;
         default:
             return DefWindowProc(hWnd, message, wParam, lParam);
