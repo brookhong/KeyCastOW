@@ -82,7 +82,7 @@ POINT deskOrigin;
 #define MAXLABELS 60
 KeyLabel keyLabels[MAXLABELS];
 DWORD labelCount = 0;
-RECT desktopRect;
+SIZE desktopSize;
 
 #include "keycast.h"
 #include "keylog.h"
@@ -90,6 +90,7 @@ RECT desktopRect;
 WCHAR *szWinName = L"KeyCastOW";
 HWND hMainWnd;
 HWND hDlgSettings;
+RECT settingsDlgRect;
 HWND hWndStamp;
 HINSTANCE hInstance;
 Graphics * g;
@@ -99,7 +100,7 @@ Font * fontPlus = NULL;
 #define WM_TRAYMSG     101
 #define MENU_CONFIG    32
 #define MENU_EXIT      33
-#define MENU_RESTORE      34
+#define MENU_RESTORE   34
 #ifdef _DEBUG
 #include <sstream>
 void log(char * fileName, const std::stringstream & line) {
@@ -113,7 +114,7 @@ void stamp(HWND hwnd, LPCWSTR text) {
     GetWindowRect(hwnd,&rt);
     HDC hdc = GetDC(hwnd);
     HDC memDC = ::CreateCompatibleDC(hdc);
-    HBITMAP memBitmap = ::CreateCompatibleBitmap(hdc, desktopRect.right, desktopRect.bottom);
+    HBITMAP memBitmap = ::CreateCompatibleBitmap(hdc, desktopSize.cx, desktopSize.cy);
     ::SelectObject(memDC,memBitmap);
     Graphics g(memDC);
     g.SetSmoothingMode(SmoothingModeAntiAlias);
@@ -121,7 +122,7 @@ void stamp(HWND hwnd, LPCWSTR text) {
     g.Clear(Color::Color(0, 0x7f,0,0x8f));
 
     RectF rc((REAL)labelSettings.borderSize, (REAL)labelSettings.borderSize, 0.0, 0.0);
-    SizeF stringSize, layoutSize((REAL)desktopRect.right-2*labelSettings.borderSize, (REAL)desktopRect.bottom-2*labelSettings.borderSize);
+    SizeF stringSize, layoutSize((REAL)desktopSize.cx-2*labelSettings.borderSize, (REAL)desktopSize.cy-2*labelSettings.borderSize);
     StringFormat format;
     format.SetAlignment(StringAlignmentCenter);
     g.MeasureString(text, wcslen(text), fontPlus, layoutSize, &format, &stringSize);
@@ -220,7 +221,7 @@ static void startFade() {
     }
     DWORD i = 0;
     BOOL dirty = FALSE;
-    SIZE wndSize = {0, desktopRect.bottom};
+    SIZE wndSize = {0, desktopSize.cy};
     for(i = 0; i < labelCount; i++) {
         RectF &rt = keyLabels[i].rect;
         if(keyLabels[i].time > labelSettings.fadeDuration) {
@@ -253,13 +254,15 @@ bool outOfLine(LPCWSTR text) {
     RectF box;
     PointF origin(0, 0);
     g->MeasureString(keyLabels[labelCount-1].text, keyLabels[labelCount-1].length, fontPlus, origin, &box);
+    int cx = (deskOrigin.x > 0 ? deskOrigin.x : 0) + (int)box.Width+2*labelSettings.cornerSize+labelSettings.borderSize*2;
 #ifdef _DEBUG
     std::stringstream line;
-    line << "x:" << deskOrigin.x << ";";
-    line << "w:" << desktopRect.right << "\n";
+    line << "desktopSize: {" << desktopSize.cx << "," << desktopSize.cy << "};\n";
+    line << "deskOrigin: {" << deskOrigin.x << "," << deskOrigin.y << "};\n";
+    line << "cx: " << cx << ";\n";
     log("d:\\KeyCastOW.log", line);
 #endif
-    return (deskOrigin.x+box.Width+2*labelSettings.cornerSize+labelSettings.borderSize*2 >= desktopRect.right);
+    return ( cx >= desktopSize.cx);
 }
 void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
     SetWindowPos(hMainWnd,HWND_TOPMOST,0,0,0,0,SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE);
@@ -307,7 +310,7 @@ void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
 
         newStrokeCount = labelSettings.keyStrokeDelay;
     }
-    SIZE wndSize = {0, desktopRect.bottom};
+    SIZE wndSize = {0, desktopSize.cy};
     for(i = 0; i < labelCount; i++) {
         RectF &rt = keyLabels[i].rect;
         if(keyLabels[i].time > 0 || keyLabels[i].length > 0) {
@@ -367,11 +370,7 @@ void updateMainWindow() {
     PointF origin(0, 0);
     g->MeasureString(L"\u263b - KeyCastOW OFF", 16, fontPlus, origin, &box);
     REAL unitH = box.Height+2*labelSettings.borderSize+labelSpacing;
-    labelCount = (desktopRect.bottom - desktopRect.top) / (int)unitH;
-    int maxW = desktopRect.right-(int)(box.Width+8*labelSettings.borderSize);
-    if(deskOrigin.x < 0 || deskOrigin.x > maxW) {
-        deskOrigin.x = maxW;
-    }
+    labelCount = desktopSize.cy / (int)unitH;
 
     if(labelCount > MAXLABELS)
         labelCount = MAXLABELS;
@@ -390,13 +389,45 @@ void updateMainWindow() {
 
     stamp(hWndStamp, branding);
 }
+HWND CreateToolTip(HWND hDlg, int toolID, LPWSTR pszText) {
+    // Get the window of the tool.
+    HWND hwndTool = GetDlgItem(hDlg, toolID);
+
+    // Create the tooltip. g_hInst is the global instance handle.
+    HWND hwndTip = CreateWindowEx(NULL, TOOLTIPS_CLASS, NULL,
+            WS_POPUP |TTS_ALWAYSTIP | TTS_BALLOON,
+            CW_USEDEFAULT, CW_USEDEFAULT,
+            CW_USEDEFAULT, CW_USEDEFAULT,
+            hDlg, NULL,
+            hInstance, NULL);
+
+    if (!hwndTool || !hwndTip) {
+        return (HWND)NULL;
+    }
+
+    // Associate the tooltip with the tool.
+    TOOLINFO toolInfo = { 0 };
+    toolInfo.cbSize = sizeof(toolInfo);
+    toolInfo.hwnd = hDlg;
+    toolInfo.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+    toolInfo.uId = (UINT_PTR)hwndTool;
+    toolInfo.lpszText = pszText;
+    SendMessage(hwndTip, TTM_ADDTOOL, 0, (LPARAM)&toolInfo);
+
+    return hwndTip;
+}
 void initSettings() {
     labelSettings.reset();
     previewLabelSettings.reset();
     labelSpacing = 30;
     wcscpy_s(branding, BRANDINGMAX, TEXT("Hi there, press any key to try, double click to configure."));
-    deskOrigin.x = -1;
-    deskOrigin.y = 0;
+    // deskOrigin.x = 0x7fffffff;
+    // deskOrigin.y = 0x7fffffff;
+    deskOrigin.x = settingsDlgRect.left;
+    deskOrigin.y = desktopSize.cy - settingsDlgRect.bottom;
+    SetWindowPos(hDlgSettings, 0,
+            desktopSize.cx - settingsDlgRect.right + settingsDlgRect.left,
+            desktopSize.cy - settingsDlgRect.bottom + settingsDlgRect.top, 0, 0, SWP_NOSIZE);
     visibleShift = FALSE;
     onlyCommandKeys = FALSE;
     tcModifiers = MOD_ALT;
@@ -624,9 +655,13 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
         case WM_INITDIALOG:
             {
                 renderSettingsData(hwndDlg);
-                RECT r;
-                GetWindowRect(hwndDlg, &r);
-                SetWindowPos(hwndDlg, 0, desktopRect.right - r.right + r.left, desktopRect.bottom - r.bottom + r.top, 0, 0, SWP_NOSIZE);
+                GetWindowRect(hwndDlg, &settingsDlgRect);
+                SetWindowPos(hwndDlg, 0,
+                        desktopSize.cx - settingsDlgRect.right + settingsDlgRect.left,
+                        desktopSize.cy - settingsDlgRect.bottom + settingsDlgRect.top, 0, 0, SWP_NOSIZE);
+                GetWindowRect(hwndDlg, &settingsDlgRect);
+                CreateToolTip(hwndDlg, IDC_OFFSETX, L"You can drag this dialog to set position.");
+                CreateToolTip(hwndDlg, IDC_OFFSETY, L"You can drag this dialog to set position.");
             }
             return TRUE;
         case WM_NOTIFY:
@@ -643,6 +678,14 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     }
             }
 
+            break;
+        case WM_MOVE:
+            deskOrigin.x = (int)(short) LOWORD(lParam);
+            deskOrigin.y = desktopSize.cy - (int)(short) HIWORD(lParam) - (settingsDlgRect.bottom - settingsDlgRect.top);
+            swprintf(tmp, 256, L"%d", deskOrigin.x);
+            SetDlgItemText(hwndDlg, IDC_OFFSETX, tmp);
+            swprintf(tmp, 256, L"%d", deskOrigin.y);
+            SetDlgItemText(hwndDlg, IDC_OFFSETY, tmp);
             break;
         case WM_COMMAND:
             switch (LOWORD(wParam))
@@ -770,6 +813,12 @@ LRESULT CALLBACK DraggableWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
     }
     return 0;
 }
+void getDesktopRect() {
+    RECT desktopRect;
+    SystemParametersInfo(SPI_GETWORKAREA,NULL,&desktopRect,NULL);
+    desktopSize.cx = desktopRect.right - desktopRect.left;
+    desktopSize.cy = desktopRect.bottom - desktopRect.top;
+}
 LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     static POINT s_last_mouse;
     static HMENU hPopMenu;
@@ -844,8 +893,7 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
             PostQuitMessage(0);
             break;
         case WM_DISPLAYCHANGE:
-            SystemParametersInfo(SPI_GETWORKAREA,NULL,&desktopRect,NULL);
-            deskOrigin.x = -1;
+            getDesktopRect();
             updateMainWindow();
             break;
         default:
@@ -893,14 +941,14 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         return 0;
     }
 
-    SystemParametersInfo(SPI_GETWORKAREA,NULL,&desktopRect,NULL);
+    getDesktopRect();
     hMainWnd = CreateWindowEx(
             WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
             szWinName,
             szWinName,
             WS_POPUP,
             0, 0,            //X and Y position of window
-            desktopRect.right - desktopRect.left, desktopRect.bottom - desktopRect.top,            //Width and height of window
+            1, 1,            //Width and height of window
             NULL,
             NULL,
             hThisInst,
@@ -911,6 +959,7 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         return 0;
     }
 
+    hDlgSettings = CreateDialog(hThisInst, MAKEINTRESOURCE(IDD_DLGSETTINGS), NULL, (DLGPROC)SettingsWndProc);
     loadSettings();
     MyRegisterClassEx(hThisInst, L"STAMP", DraggableWndProc);
     hWndStamp = CreateWindowEx(
@@ -926,7 +975,7 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
 
     HDC hdc = GetDC(hMainWnd);
     HDC hdcBuffer = CreateCompatibleDC(hdc);
-    HBITMAP hbitmap = CreateCompatibleBitmap(hdc, desktopRect.right, desktopRect.bottom);
+    HBITMAP hbitmap = CreateCompatibleBitmap(hdc, desktopSize.cx, desktopSize.cy);
     HBITMAP hBitmapOld = (HBITMAP)SelectObject(hdcBuffer, (HGDIOBJ)hbitmap);
     ReleaseDC(hMainWnd, hdc);
     DeleteObject(hBitmapOld);
@@ -936,7 +985,6 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
 
     updateMainWindow();
     ShowWindow(hMainWnd, SW_SHOW);
-    hDlgSettings = CreateDialog(hThisInst, MAKEINTRESOURCE(IDD_DLGSETTINGS), NULL, (DLGPROC)SettingsWndProc);
     HFONT hlabelFont = CreateFont(20,10,0,0,FW_BLACK,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_OUTLINE_PRECIS,
                 CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY, VARIABLE_PITCH,TEXT("Arial"));
     HWND hlink = GetDlgItem(hDlgSettings, IDC_SYSLINK1);
