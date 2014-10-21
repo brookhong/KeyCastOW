@@ -254,7 +254,9 @@ bool outOfLine(LPCWSTR text) {
     RectF box;
     PointF origin(0, 0);
     g->MeasureString(keyLabels[labelCount-1].text, keyLabels[labelCount-1].length, fontPlus, origin, &box);
-    int cx = (deskOrigin.x > 0 ? deskOrigin.x : 0) + (int)box.Width+2*labelSettings.cornerSize+labelSettings.borderSize*2;
+    int cx = (int)box.Width+2*labelSettings.cornerSize+labelSettings.borderSize*2;
+    int ox = deskOrigin.x%desktopSize.cx;
+    bool out = (ox < 0) ? (cx >= -ox) : (ox + cx) >= desktopSize.cx;
 #ifdef _DEBUG
     std::stringstream line;
     line << "desktopSize: {" << desktopSize.cx << "," << desktopSize.cy << "};\n";
@@ -262,7 +264,7 @@ bool outOfLine(LPCWSTR text) {
     line << "cx: " << cx << ";\n";
     log("d:\\KeyCastOW.log", line);
 #endif
-    return ( cx >= desktopSize.cx);
+    return out;
 }
 void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
     SetWindowPos(hMainWnd,HWND_TOPMOST,0,0,0,0,SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE);
@@ -378,7 +380,7 @@ void updateMainWindow() {
     g->Clear(Color::Color(0, 0x7f,0,0x8f));
     for(DWORD i = 0; i < labelCount; i ++) {
         keyLabels[i].rect.X = (REAL)labelSettings.borderSize;
-        keyLabels[i].rect.Y = unitH*i;
+        keyLabels[i].rect.Y = unitH*i + labelSpacing - labelSettings.borderSize;
         if(keyLabels[i].time > labelSettings.lingerTime+labelSettings.fadeDuration) {
             keyLabels[i].time = labelSettings.lingerTime+labelSettings.fadeDuration;
         }
