@@ -131,11 +131,33 @@ struct Key specialKeys[] = {
     {0xFD, L"PA1"},
     {0xFE, L"OEM_CLEAR"}
 };
+
 size_t nSpecialKeys = sizeof(specialKeys) / sizeof(Key);
 
+LPCWSTR mouseActions[] = {
+    L"MouseMove",
+    L"LButtonDown",
+    L"LButtonUp",
+    L"LButtonDBLCLK",
+    L"RButtonDown",
+    L"RButtonUp",
+    L"RButtonDBLCLK",
+    L"MButtonDown",
+    L"MButtonUp",
+    L"MButtonDBLCLK",
+    L"MouseWheel",
+    L"XButtonDown",
+    L"XButtonUp",
+    L"XButtonDBLCLK",
+    L"MouseHWheel"
+};
+
+size_t nMouseActions = sizeof(mouseActions) / sizeof(LPCWSTR);
+
 extern BOOL visibleShift;
+extern BOOL mouseCapturing;
 extern BOOL onlyCommandKeys;
-HHOOK kbdhook;
+HHOOK kbdhook, moshook;
 void showText(LPCWSTR text, BOOL forceNewStroke = FALSE);
 
 LPCWSTR GetSymbolFromVK(UINT vk, UINT sc, BOOL mod) {
@@ -224,9 +246,9 @@ void cleanModifier(UINT vk, LPWSTR modifierkeys) {
     }
 }
 
+static WCHAR modifierkey[64] = L"\0";
 LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
 {
-    static WCHAR modifierkey[64] = L"\0";
     KBDLLHOOKSTRUCT k = *(KBDLLHOOKSTRUCT *)lp;
     WCHAR c[64] = L"\0";
     WCHAR tmp[64] = L"\0";
@@ -286,4 +308,28 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
     }
 
     return CallNextHookEx(kbdhook, nCode, wp, lp);
+}
+
+LRESULT CALLBACK LLMouseProc(int nCode, WPARAM wp, LPARAM lp)
+{
+    WCHAR c[64] = L"\0";
+    WCHAR tmp[64] = L"\0";
+
+    UINT idx = wp - WM_MOUSEFIRST;
+    if (mouseCapturing && idx > 0 && idx < nMouseActions && nCode == HC_ACTION) {
+        MSLLHOOKSTRUCT* ms = reinterpret_cast<MSLLHOOKSTRUCT*>(lp);
+
+        if (!(ms->flags & LLMHF_INJECTED)) {
+            swprintf(c, 64, mouseActions[idx]);
+            if(c[0] != '\0') {
+                if(modifierkey[0] == '\0') {
+                    swprintf(tmp, 64, L"<%s>", c);
+                } else {
+                    swprintf(tmp, 64, L"<%s - %s>", modifierkey, c);
+                }
+                showText(tmp, TRUE);
+            }
+        }
+    }
+    return CallNextHookEx(moshook, nCode, wp, lp);
 }

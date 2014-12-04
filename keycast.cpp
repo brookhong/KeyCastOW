@@ -72,6 +72,7 @@ struct LabelSettings {
 LabelSettings labelSettings, previewLabelSettings;
 DWORD labelSpacing;
 BOOL visibleShift = FALSE;
+BOOL mouseCapturing = TRUE;
 BOOL onlyCommandKeys = FALSE;
 UINT tcModifiers = MOD_ALT;
 UINT tcKey = 0x42;      // 0x42 is 'b'
@@ -431,6 +432,7 @@ void initSettings() {
             desktopSize.cx - settingsDlgRect.right + settingsDlgRect.left,
             desktopSize.cy - settingsDlgRect.bottom + settingsDlgRect.top, 0, 0, SWP_NOSIZE);
     visibleShift = FALSE;
+    mouseCapturing = TRUE;
     onlyCommandKeys = FALSE;
     tcModifiers = MOD_ALT;
     tcKey = 0x42;
@@ -466,6 +468,7 @@ BOOL saveSettings() {
     RegSetKeyValue(hChildKey, NULL, L"offsetX", REG_DWORD, (LPCVOID)&deskOrigin.x, sizeof(deskOrigin.x));
     RegSetKeyValue(hChildKey, NULL, L"offsetY", REG_DWORD, (LPCVOID)&deskOrigin.y, sizeof(deskOrigin.y));
     RegSetKeyValue(hChildKey, NULL, L"visibleShift", REG_DWORD, (LPCVOID)&visibleShift, sizeof(visibleShift));
+    RegSetKeyValue(hChildKey, NULL, L"mouseCapturing", REG_DWORD, (LPCVOID)&mouseCapturing, sizeof(mouseCapturing));
     RegSetKeyValue(hChildKey, NULL, L"onlyCommandKeys", REG_DWORD, (LPCVOID)&onlyCommandKeys, sizeof(onlyCommandKeys));
     RegSetKeyValue(hChildKey, NULL, L"tcModifiers", REG_DWORD, (LPCVOID)&tcModifiers, sizeof(tcModifiers));
     RegSetKeyValue(hChildKey, NULL, L"tcKey", REG_DWORD, (LPCVOID)&tcKey, sizeof(tcKey));
@@ -505,6 +508,7 @@ BOOL loadSettings() {
         RegGetValue(hChildKey, NULL, L"offsetX", RRF_RT_DWORD, NULL, &deskOrigin.x, &size);
         RegGetValue(hChildKey, NULL, L"offsetY", RRF_RT_DWORD, NULL, &deskOrigin.y, &size);
         RegGetValue(hChildKey, NULL, L"visibleShift", RRF_RT_DWORD, NULL, &visibleShift, &size);
+        RegGetValue(hChildKey, NULL, L"mouseCapturing", RRF_RT_DWORD, NULL, &mouseCapturing, &size);
         RegGetValue(hChildKey, NULL, L"onlyCommandKeys", RRF_RT_DWORD, NULL, &onlyCommandKeys, &size);
         RegGetValue(hChildKey, NULL, L"tcModifiers", RRF_RT_DWORD, NULL, &tcModifiers, &size);
         RegGetValue(hChildKey, NULL, L"tcKey", RRF_RT_DWORD, NULL, &tcKey, &size);
@@ -549,6 +553,7 @@ void renderSettingsData(HWND hwndDlg) {
     SetDlgItemText(hwndDlg, IDC_OFFSETY, tmp);
     SetDlgItemText(hwndDlg, IDC_BRANDING, branding);
     CheckDlgButton(hwndDlg, IDC_VISIBLESHIFT, visibleShift ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwndDlg, IDC_MOUSECAPTURING, mouseCapturing ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_ONLYCOMMANDKEYS, onlyCommandKeys ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_MODCTRL, (tcModifiers & MOD_CONTROL) ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_MODALT, (tcModifiers & MOD_ALT) ? BST_CHECKED : BST_UNCHECKED);
@@ -745,6 +750,7 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     deskOrigin.y = _wtoi(tmp);
                     GetDlgItemText(hwndDlg, IDC_BRANDING, branding, BRANDINGMAX);
                     visibleShift = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_VISIBLESHIFT));
+                    mouseCapturing = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MOUSECAPTURING));
                     onlyCommandKeys = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_ONLYCOMMANDKEYS));
                     tcModifiers = 0;
                     if(BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MODCTRL)) {
@@ -997,6 +1003,7 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     previewTimer.OnTimedEvent = previewLabel;
 
     kbdhook = SetWindowsHookEx(WH_KEYBOARD_LL, LLKeyboardProc, hThisInst, NULL);
+    moshook = SetWindowsHookEx(WH_MOUSE_LL, LLMouseProc, hThisInst, 0);
 
     while( GetMessage(&msg, NULL, 0, 0) )    {
         if (msg.message == WM_HOTKEY) {
@@ -1004,9 +1011,12 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
                 showText(L"\u263b - KeyCastOW OFF", TRUE);
                 UnhookWindowsHookEx(kbdhook);
                 kbdhook = NULL;
+                UnhookWindowsHookEx(moshook);
+                moshook = NULL;
             } else {
                 showText(L"\u263b - KeyCastOW ON", TRUE);
                 kbdhook = SetWindowsHookEx(WH_KEYBOARD_LL, LLKeyboardProc, hInstance, NULL);
+                moshook = SetWindowsHookEx(WH_MOUSE_LL, LLMouseProc, hThisInst, 0);
             }
         } else {
             TranslateMessage(&msg);
@@ -1015,6 +1025,7 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     }
 
     UnhookWindowsHookEx(kbdhook);
+    UnhookWindowsHookEx(moshook);
     UnregisterHotKey(NULL, 1);
     delete g;
     delete fontPlus;
