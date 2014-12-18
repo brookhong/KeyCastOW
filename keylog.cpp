@@ -157,6 +157,7 @@ size_t nMouseActions = sizeof(mouseActions) / sizeof(LPCWSTR);
 extern BOOL visibleShift;
 extern BOOL mouseCapturing;
 extern BOOL onlyCommandKeys;
+extern WCHAR comboChars[3];
 HHOOK kbdhook, moshook;
 void showText(LPCWSTR text, BOOL forceNewStroke = FALSE);
 
@@ -175,7 +176,7 @@ LPCWSTR GetSymbolFromVK(UINT vk, UINT sc, BOOL mod) {
     if(ToAsciiEx(vk, sc, btKeyState, &Symbol, 0, hklLayout) == 1) {
         if(!visibleShift && mod && GetKeyState(VK_SHIFT) < 0) {
             // prefix "Shift - " only when Ctrl or Alt is hold (mod as TRUE)
-            swprintf(symbol, 32, L"Shift - %c", (WCHAR)Symbol);
+            swprintf(symbol, 32, L"Shift %c %c", comboChars[1], (WCHAR)Symbol);
         } else {
             symbol[0] = (WCHAR)Symbol;
             symbol[1] = L'\0';
@@ -209,13 +210,13 @@ LPCWSTR getModSpecialKey(UINT vk, BOOL mod = FALSE) {
         LPCWSTR sk = getSpecialKey(vk);
         if(!visibleShift && GetKeyState(VK_SHIFT) < 0) {
             // prefix "Shift - "
-            swprintf(tmp, 64, L"Shift - %s", sk);
+            swprintf(tmp, 64, L"Shift %c %s", comboChars[1], sk);
             sk= tmp;
         }
         if(!mod && HIBYTE(sk[0]) == 0) {
             // if the special key is not used with modifierkey, and has not been replaced with visible symbol
             // then surround it with <>
-            swprintf(modsk, 64, L"<%s>", sk);
+            swprintf(modsk, 64, L"%c%s%c", comboChars[0], sk, comboChars[2]);
         } else {
             swprintf(modsk, 64, L"%s", sk);
         }
@@ -264,7 +265,7 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
                 k.vkCode == 0x5B || k.vkCode == 0x5C) {
             if(!fin && modifierkey[0] != '\0') {
                 // show Ctrl/Alt/Win keys only when they're not used as modifier.
-                swprintf(c, 64, L"<%s>", modifierkey);
+                swprintf(c, 64, L"%c%s%c", comboChars[0], modifierkey, comboChars[2]);
                 showText(c, TRUE);
             }
             cleanModifier(k.vkCode, modifierkey);
@@ -278,7 +279,7 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
                 wcscpy_s(modifierkey, 64, ck);
             } else if(!wcsstr(modifierkey, ck)) {
                 wcscpy_s(tmp, 64, modifierkey);
-                swprintf(modifierkey, 64, L"%s - %s", tmp, ck);
+                swprintf(modifierkey, 64, L"%s %c %s", tmp, comboChars[1], ck);
             }
         } else {
             WORD a = 0;
@@ -297,7 +298,7 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
             if(theKey) {
                 if(mod) {
                     fin = TRUE;
-                    swprintf(tmp, 64, L"<%s - %s>", modifierkey, theKey);
+                    swprintf(tmp, 64, L"%c%s %c %s%c", comboChars[0], modifierkey, comboChars[1], theKey, comboChars[2]);
                     theKey = tmp;
                 }
                 if(fin || !onlyCommandKeys) {
@@ -323,9 +324,9 @@ LRESULT CALLBACK LLMouseProc(int nCode, WPARAM wp, LPARAM lp)
             swprintf(c, 64, mouseActions[idx]);
             if(c[0] != '\0') {
                 if(modifierkey[0] == '\0') {
-                    swprintf(tmp, 64, L"<%s>", c);
+                    swprintf(tmp, 64, L"%c%s%c", comboChars[0], c, comboChars[2]);
                 } else {
-                    swprintf(tmp, 64, L"<%s - %s>", modifierkey, c);
+                    swprintf(tmp, 64, L"%c%s %c %s%c", comboChars[0], modifierkey, comboChars[1], c, comboChars[2]);
                 }
                 showText(tmp, TRUE);
             }

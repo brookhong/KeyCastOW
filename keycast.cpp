@@ -1,7 +1,7 @@
 // Copyright © 2014 Brook Hong. All Rights Reserved.
 //
 
-// k.vim#cmd msbuild /p:platform=win32 /p:Configuration=Release && .\Release\keycastow.exe
+// msbuild /p:platform=win32 /p:Configuration=Release
 // msbuild keycastow.vcxproj /t:Clean
 // rc keycastow.rc && cl -DUNICODE -D_UNICODE keycast.cpp keylog.cpp keycastow.res user32.lib shell32.lib gdi32.lib Comdlg32.lib comctl32.lib
 
@@ -78,10 +78,12 @@ UINT tcModifiers = MOD_ALT;
 UINT tcKey = 0x42;      // 0x42 is 'b'
 #define BRANDINGMAX 256
 WCHAR branding[BRANDINGMAX];
+WCHAR comboChars[3];
 POINT deskOrigin;
 
 #define MAXLABELS 60
 KeyLabel keyLabels[MAXLABELS];
+DWORD maximumLines = 10;
 DWORD labelCount = 0;
 SIZE desktopSize;
 
@@ -228,15 +230,18 @@ static void startFade() {
         if(keyLabels[i].time > labelSettings.fadeDuration) {
             keyLabels[i].time -= SHOWTIMER_INTERVAL;
             wndSize.cx = max(wndSize.cx, (LONG)rt.Width+2*labelSettings.borderSize+1);
-        } else if(keyLabels[i].time > 0) {
+        } else if(keyLabels[i].time >= SHOWTIMER_INTERVAL) {
             keyLabels[i].time -= SHOWTIMER_INTERVAL;
             updateLabel(i);
             dirty = TRUE;
             wndSize.cx = max(wndSize.cx, (LONG)rt.Width+2*labelSettings.borderSize+1);
-        } else if(keyLabels[i].length){
-            eraseLabel(i);
-            keyLabels[i].length = 0;
-            wndSize.cx = max(wndSize.cx, (LONG)rt.Width+2*labelSettings.borderSize+1);
+        } else {
+            keyLabels[i].time = 0;
+            if(keyLabels[i].length){
+                eraseLabel(i);
+                keyLabels[i].length = 0;
+                wndSize.cx = max(wndSize.cx, (LONG)rt.Width+2*labelSettings.borderSize+1);
+            }
         }
     }
     if(dirty) {
@@ -285,7 +290,9 @@ void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
             updateLabel(i-1);
             eraseLabel(i);
         }
-        keyLabels[labelCount-1].text = keyLabels[labelCount-2].text + keyLabels[labelCount-2].length;
+        if(labelCount > 1) {
+            keyLabels[labelCount-1].text = keyLabels[labelCount-2].text + keyLabels[labelCount-2].length;
+        }
         if(keyLabels[labelCount-1].text+newLen >= textBufferEnd) {
             keyLabels[labelCount-1].text = textBuffer;
         }
@@ -375,13 +382,16 @@ void updateMainWindow() {
     REAL unitH = box.Height+2*labelSettings.borderSize+labelSpacing;
     labelCount = desktopSize.cy / (int)unitH;
 
-    if(labelCount > MAXLABELS)
-        labelCount = MAXLABELS;
+    DWORD offset = 0;
+    if(labelCount > maximumLines) {
+        offset = labelCount-maximumLines;
+        labelCount = maximumLines;
+    }
 
     g->Clear(Color::Color(0, 0x7f,0,0x8f));
     for(DWORD i = 0; i < labelCount; i ++) {
         keyLabels[i].rect.X = (REAL)labelSettings.borderSize;
-        keyLabels[i].rect.Y = unitH*i + labelSpacing - labelSettings.borderSize;
+        keyLabels[i].rect.Y = unitH*(i+offset) + labelSpacing - labelSettings.borderSize;
         if(keyLabels[i].time > labelSettings.lingerTime+labelSettings.fadeDuration) {
             keyLabels[i].time = labelSettings.lingerTime+labelSettings.fadeDuration;
         }
@@ -423,7 +433,9 @@ void initSettings() {
     labelSettings.reset();
     previewLabelSettings.reset();
     labelSpacing = 30;
+    maximumLines = 10;
     wcscpy_s(branding, BRANDINGMAX, TEXT("Hi there, press any key to try, double click to configure."));
+    wcscpy_s(comboChars, sizeof(comboChars), TEXT("<->"));
     // deskOrigin.x = 0x7fffffff;
     // deskOrigin.y = 0x7fffffff;
     deskOrigin.x = settingsDlgRect.left;
@@ -465,6 +477,7 @@ BOOL saveSettings() {
     RegSetKeyValue(hChildKey, NULL, L"borderSize", REG_DWORD, (LPCVOID)&labelSettings.borderSize, sizeof(labelSettings.borderSize));
     RegSetKeyValue(hChildKey, NULL, L"cornerSize", REG_DWORD, (LPCVOID)&labelSettings.cornerSize, sizeof(labelSettings.cornerSize));
     RegSetKeyValue(hChildKey, NULL, L"labelSpacing", REG_DWORD, (LPCVOID)&labelSpacing, sizeof(labelSpacing));
+    RegSetKeyValue(hChildKey, NULL, L"maximumLines", REG_DWORD, (LPCVOID)&maximumLines, sizeof(maximumLines));
     RegSetKeyValue(hChildKey, NULL, L"offsetX", REG_DWORD, (LPCVOID)&deskOrigin.x, sizeof(deskOrigin.x));
     RegSetKeyValue(hChildKey, NULL, L"offsetY", REG_DWORD, (LPCVOID)&deskOrigin.y, sizeof(deskOrigin.y));
     RegSetKeyValue(hChildKey, NULL, L"visibleShift", REG_DWORD, (LPCVOID)&visibleShift, sizeof(visibleShift));
@@ -473,6 +486,7 @@ BOOL saveSettings() {
     RegSetKeyValue(hChildKey, NULL, L"tcModifiers", REG_DWORD, (LPCVOID)&tcModifiers, sizeof(tcModifiers));
     RegSetKeyValue(hChildKey, NULL, L"tcKey", REG_DWORD, (LPCVOID)&tcKey, sizeof(tcKey));
     RegSetKeyValue(hChildKey, NULL, L"branding", REG_SZ, (LPCVOID)branding, (wcslen(branding)+1)*sizeof(WCHAR));
+    RegSetKeyValue(hChildKey, NULL, L"comboChars", REG_SZ, (LPCVOID)comboChars, sizeof(comboChars));
 
     RegCloseKey(hRootKey);
     RegCloseKey(hChildKey);
@@ -505,6 +519,7 @@ BOOL loadSettings() {
         RegGetValue(hChildKey, NULL, L"borderSize", RRF_RT_DWORD, NULL, &labelSettings.borderSize, &size);
         RegGetValue(hChildKey, NULL, L"cornerSize", RRF_RT_DWORD, NULL, &labelSettings.cornerSize, &size);
         RegGetValue(hChildKey, NULL, L"labelSpacing", RRF_RT_DWORD, NULL, &labelSpacing, &size);
+        RegGetValue(hChildKey, NULL, L"maximumLines", RRF_RT_DWORD, NULL, &maximumLines, &size);
         RegGetValue(hChildKey, NULL, L"offsetX", RRF_RT_DWORD, NULL, &deskOrigin.x, &size);
         RegGetValue(hChildKey, NULL, L"offsetY", RRF_RT_DWORD, NULL, &deskOrigin.y, &size);
         RegGetValue(hChildKey, NULL, L"visibleShift", RRF_RT_DWORD, NULL, &visibleShift, &size);
@@ -514,6 +529,8 @@ BOOL loadSettings() {
         RegGetValue(hChildKey, NULL, L"tcKey", RRF_RT_DWORD, NULL, &tcKey, &size);
         size = sizeof(branding);
         RegGetValue(hChildKey, NULL, L"branding", RRF_RT_REG_SZ, NULL, branding, &size);
+        size = sizeof(comboChars);
+        RegGetValue(hChildKey, NULL, L"comboChars", RRF_RT_REG_SZ, NULL, comboChars, &size);
 
         size = sizeof(labelSettings.labelFont);
         RegGetValue(hChildKey, NULL, L"labelFont", RRF_RT_REG_BINARY, NULL, &labelSettings.labelFont, &size);
@@ -547,11 +564,14 @@ void renderSettingsData(HWND hwndDlg) {
 
     swprintf(tmp, 256, L"%d", labelSpacing);
     SetDlgItemText(hwndDlg, IDC_LABELSPACING, tmp);
+    swprintf(tmp, 256, L"%d", maximumLines);
+    SetDlgItemText(hwndDlg, IDC_MAXIMUMLINES, tmp);
     swprintf(tmp, 256, L"%d", deskOrigin.x);
     SetDlgItemText(hwndDlg, IDC_OFFSETX, tmp);
     swprintf(tmp, 256, L"%d", deskOrigin.y);
     SetDlgItemText(hwndDlg, IDC_OFFSETY, tmp);
     SetDlgItemText(hwndDlg, IDC_BRANDING, branding);
+    SetDlgItemText(hwndDlg, IDC_COMBSCHEME, comboChars);
     CheckDlgButton(hwndDlg, IDC_VISIBLESHIFT, visibleShift ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_MOUSECAPTURING, mouseCapturing ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_ONLYCOMMANDKEYS, onlyCommandKeys ? BST_CHECKED : BST_UNCHECKED);
@@ -570,6 +590,9 @@ void getLabelSettings(HWND hwndDlg, LabelSettings &lblSettings) {
     lblSettings.lingerTime = _wtoi(tmp);
     GetDlgItemText(hwndDlg, IDC_FADEDURATION, tmp, 256);
     lblSettings.fadeDuration = _wtoi(tmp);
+    if(lblSettings.fadeDuration < SHOWTIMER_INTERVAL*5) {
+        lblSettings.fadeDuration = SHOWTIMER_INTERVAL*5;
+    }
     GetDlgItemText(hwndDlg, IDC_BGOPACITY, tmp, 256);
     lblSettings.bgOpacity = _wtoi(tmp);
     lblSettings.bgOpacity = min(lblSettings.bgOpacity, 255);
@@ -588,12 +611,12 @@ void getLabelSettings(HWND hwndDlg, LabelSettings &lblSettings) {
 DWORD previewTime = 0;
 #define PREVIEWTIMER_INTERVAL 5
 static void previewLabel() {
-    RECT rt = {12, 50, 222, 230};
+    RECT rt = {12, 58, 222, 238};
 
     getLabelSettings(hDlgSettings, previewLabelSettings);
     DWORD mg = previewLabelSettings.lingerTime+previewLabelSettings.fadeDuration+600;
     double r;
-    if(previewTime == 0 || previewTime > mg) {
+    if(previewTime < PREVIEWTIMER_INTERVAL || previewTime > mg) {
         previewTime = mg;
     }
     if(previewTime > mg-600) {
@@ -603,7 +626,7 @@ static void previewLabel() {
     else if(previewTime > previewLabelSettings.fadeDuration) {
         r = 1;
         previewTime -= PREVIEWTIMER_INTERVAL;
-    } else if(previewTime > 0) {
+    } else if(previewTime >= PREVIEWTIMER_INTERVAL) {
         previewTime -= PREVIEWTIMER_INTERVAL;
         r = 1.0*previewTime/previewLabelSettings.fadeDuration;
     }
@@ -669,6 +692,7 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                 GetWindowRect(hwndDlg, &settingsDlgRect);
                 CreateToolTip(hwndDlg, IDC_OFFSETX, L"You can drag this dialog to set position.");
                 CreateToolTip(hwndDlg, IDC_OFFSETY, L"You can drag this dialog to set position.");
+                CreateToolTip(hwndDlg, IDC_COMBSCHEME, L"[+] to display combination keys like [Alt + Tab].");
             }
             return TRUE;
         case WM_NOTIFY:
@@ -744,11 +768,17 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     labelSettings = previewLabelSettings;
                     GetDlgItemText(hwndDlg, IDC_LABELSPACING, tmp, 256);
                     labelSpacing = _wtoi(tmp);
+                    GetDlgItemText(hwndDlg, IDC_MAXIMUMLINES, tmp, 256);
+                    maximumLines = _wtoi(tmp);
+                    if(maximumLines > MAXLABELS) {
+                        maximumLines = MAXLABELS;
+                    }
                     GetDlgItemText(hwndDlg, IDC_OFFSETX, tmp, 256);
                     deskOrigin.x = _wtoi(tmp);
                     GetDlgItemText(hwndDlg, IDC_OFFSETY, tmp, 256);
                     deskOrigin.y = _wtoi(tmp);
                     GetDlgItemText(hwndDlg, IDC_BRANDING, branding, BRANDINGMAX);
+                    GetDlgItemText(hwndDlg, IDC_COMBSCHEME, comboChars, sizeof(comboChars));
                     visibleShift = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_VISIBLESHIFT));
                     mouseCapturing = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MOUSECAPTURING));
                     onlyCommandKeys = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_ONLYCOMMANDKEYS));
