@@ -78,7 +78,7 @@ UINT tcModifiers = MOD_ALT;
 UINT tcKey = 0x42;      // 0x42 is 'b'
 #define BRANDINGMAX 256
 WCHAR branding[BRANDINGMAX];
-WCHAR comboChars[3];
+WCHAR comboChars[4];
 POINT deskOrigin;
 
 #define MAXLABELS 60
@@ -486,7 +486,7 @@ BOOL saveSettings() {
     RegSetKeyValue(hChildKey, NULL, L"tcModifiers", REG_DWORD, (LPCVOID)&tcModifiers, sizeof(tcModifiers));
     RegSetKeyValue(hChildKey, NULL, L"tcKey", REG_DWORD, (LPCVOID)&tcKey, sizeof(tcKey));
     RegSetKeyValue(hChildKey, NULL, L"branding", REG_SZ, (LPCVOID)branding, (wcslen(branding)+1)*sizeof(WCHAR));
-    RegSetKeyValue(hChildKey, NULL, L"comboChars", REG_SZ, (LPCVOID)comboChars, sizeof(comboChars));
+    RegSetKeyValue(hChildKey, NULL, L"comboChars", REG_SZ, (LPCVOID)comboChars, (wcslen(comboChars)+1)*sizeof(WCHAR));
 
     RegCloseKey(hRootKey);
     RegCloseKey(hChildKey);
@@ -778,7 +778,7 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     GetDlgItemText(hwndDlg, IDC_OFFSETY, tmp, 256);
                     deskOrigin.y = _wtoi(tmp);
                     GetDlgItemText(hwndDlg, IDC_BRANDING, branding, BRANDINGMAX);
-                    GetDlgItemText(hwndDlg, IDC_COMBSCHEME, comboChars, sizeof(comboChars));
+                    GetDlgItemText(hwndDlg, IDC_COMBSCHEME, comboChars, 4);
                     visibleShift = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_VISIBLESHIFT));
                     mouseCapturing = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MOUSECAPTURING));
                     onlyCommandKeys = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_ONLYCOMMANDKEYS));
