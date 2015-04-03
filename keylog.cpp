@@ -151,15 +151,22 @@ LPCWSTR mouseActions[] = {
     L"XButtonDBLCLK",
     L"MouseHWheel"
 };
+LPCWSTR mouseVirtualActions[] = {
+    L"LClick",
+    L"RClick",
+    L"MClick"
+};
 
 size_t nMouseActions = sizeof(mouseActions) / sizeof(LPCWSTR);
 
 extern BOOL visibleShift;
+extern BOOL visibleModifier;
 extern BOOL mouseCapturing;
+extern BOOL mouseCapturingMod;
 extern BOOL onlyCommandKeys;
 extern WCHAR comboChars[3];
 HHOOK kbdhook, moshook;
-void showText(LPCWSTR text, BOOL forceNewStroke = FALSE);
+void showText(LPCWSTR text, int behavior = 0);
 
 LPCWSTR GetSymbolFromVK(UINT vk, UINT sc, BOOL mod) {
     static WCHAR symbol[32];
@@ -258,20 +265,20 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
     if(nCode < 0)
         return CallNextHookEx(kbdhook, nCode, wp, lp);
 
-    static BOOL fin = FALSE;
+    static int fin = 0;
     UINT spk = visibleShift ? 0xA0 : 0xA2;
     if(wp == WM_KEYUP || wp == WM_SYSKEYUP) {
         if(k.vkCode >= spk && k.vkCode <= 0xA5 ||
                 k.vkCode == 0x5B || k.vkCode == 0x5C) {
-            if(!fin && modifierkey[0] != '\0') {
+            if(fin == 0 && modifierkey[0] != '\0' && visibleModifier) {
                 // show Ctrl/Alt/Win keys only when they're not used as modifier.
                 swprintf(c, 64, L"%c%s%c", comboChars[0], modifierkey, comboChars[2]);
-                showText(c, TRUE);
+                showText(c, 1);
             }
             cleanModifier(k.vkCode, modifierkey);
         }
     } else if(wp == WM_KEYDOWN || wp == WM_SYSKEYDOWN) {
-        fin = FALSE;
+        fin = 0;
         if(k.vkCode >= spk && k.vkCode <= 0xA5 ||          // ctrl / alt
                 k.vkCode == 0x5B || k.vkCode == 0x5C) {     // win
             LPCWSTR ck = getSpecialKey(k.vkCode);
@@ -287,17 +294,17 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
             if(k.vkCode == 0x08 || k.vkCode == 0x09 || k.vkCode == 0x0D || k.vkCode == 0x1B || k.vkCode == 0x20) {
                 // for <BS>/<Tab>/<ENTER>/<ESC>/<SPACE>, treat them as specialKeys
                 theKey = getModSpecialKey(k.vkCode, mod);
-                fin = TRUE;
+                fin = 1;
             } else if( !(theKey = GetSymbolFromVK(k.vkCode, k.scanCode, mod))) {
                 // otherwise try to translate with ToAsciiEx
                 // if fails to translate with ToAsciiEx, then treat it as specialKeys
                 theKey = getModSpecialKey(k.vkCode, mod);
-                fin = TRUE;
+                fin = 1;
             }
 
             if(theKey) {
                 if(mod) {
-                    fin = TRUE;
+                    fin = 1;
                     swprintf(tmp, 64, L"%c%s %c %s%c", comboChars[0], modifierkey, comboChars[1], theKey, comboChars[2]);
                     theKey = tmp;
                 }
@@ -317,18 +324,41 @@ LRESULT CALLBACK LLMouseProc(int nCode, WPARAM wp, LPARAM lp)
     WCHAR tmp[64] = L"\0";
 
     UINT idx = wp - WM_MOUSEFIRST;
-    if (mouseCapturing && idx > 0 && idx < nMouseActions && nCode == HC_ACTION) {
+    int behavior = 1;
+    static DWORD mouseButtonDown = 0;
+    if ((mouseCapturing || mouseCapturingMod) && idx > 0 && idx < nMouseActions && nCode == HC_ACTION) {
         MSLLHOOKSTRUCT* ms = reinterpret_cast<MSLLHOOKSTRUCT*>(lp);
 
         if (!(ms->flags & LLMHF_INJECTED)) {
-            swprintf(c, 64, mouseActions[idx]);
-            if(c[0] != '\0') {
-                if(modifierkey[0] == '\0') {
-                    swprintf(tmp, 64, L"%c%s%c", comboChars[0], c, comboChars[2]);
-                } else {
-                    swprintf(tmp, 64, L"%c%s %c %s%c", comboChars[0], modifierkey, comboChars[1], c, comboChars[2]);
-                }
-                showText(tmp, TRUE);
+            switch (idx) {
+                case 1:
+                case 4:
+                case 7:
+                    swprintf(c, 64, mouseActions[idx]);
+                    mouseButtonDown = GetTickCount();
+                    behavior = 2;
+                    break;
+                case 2:
+                case 5:
+                case 8:
+                    behavior = 3;
+                    if(GetTickCount() - mouseButtonDown > 200) {
+                        swprintf(c, 64, mouseActions[idx]);
+                    } else {
+                        swprintf(c, 64, mouseVirtualActions[(idx-2)/3]);
+                    }
+                    break;
+                default:
+                    swprintf(c, 64, mouseActions[idx]);
+                    break;
+            }
+
+            if(modifierkey[0] != '\0') {
+                swprintf(tmp, 64, L"%c%s %c %s%c", comboChars[0], modifierkey, comboChars[1], c, comboChars[2]);
+                showText(tmp, behavior);
+            } else if(!mouseCapturingMod) {
+                swprintf(tmp, 64, L"%c%s%c", comboChars[0], c, comboChars[2]);
+                showText(tmp, behavior);
             }
         }
     }

@@ -72,7 +72,9 @@ struct LabelSettings {
 LabelSettings labelSettings, previewLabelSettings;
 DWORD labelSpacing;
 BOOL visibleShift = FALSE;
+BOOL visibleModifier = TRUE;
 BOOL mouseCapturing = TRUE;
+BOOL mouseCapturingMod = FALSE;
 BOOL onlyCommandKeys = FALSE;
 UINT tcModifiers = MOD_ALT;
 UINT tcKey = 0x42;      // 0x42 is 'b'
@@ -272,11 +274,14 @@ bool outOfLine(LPCWSTR text) {
 #endif
     return out;
 }
-void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
+void showText(LPCWSTR text, int behavior = 0) {
     SetWindowPos(hMainWnd,HWND_TOPMOST,0,0,0,0,SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE);
     size_t newLen = wcslen(text);
     DWORD i;
-    if(forceNewStroke || (newStrokeCount <= 0) || outOfLine(text)) {
+    if(behavior > 2) {
+        wcscpy_s(keyLabels[labelCount-1].text, textBufferEnd-keyLabels[labelCount-1].text, text);
+        keyLabels[labelCount-1].length = newLen;
+    } else if (behavior > 0 || (newStrokeCount <= 0) || outOfLine(text)) {
         for (i = 1; i < labelCount; i++) {
             if(keyLabels[i].time > 0) {
                 break;
@@ -300,11 +305,6 @@ void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
         //stamp(hWndStamp, branding);
         wcscpy_s(keyLabels[labelCount-1].text, textBufferEnd-keyLabels[labelCount-1].text, text);
         keyLabels[labelCount-1].length = newLen;
-
-        keyLabels[labelCount-1].time = labelSettings.lingerTime+labelSettings.fadeDuration;
-        updateLabel(labelCount-1);
-
-        newStrokeCount = labelSettings.keyStrokeDelay;
     } else {
         LPWSTR tmp = keyLabels[labelCount-1].text + keyLabels[labelCount-1].length;
         if(tmp+newLen >= textBufferEnd) {
@@ -315,19 +315,20 @@ void showText(LPCWSTR text, BOOL forceNewStroke = FALSE) {
             keyLabels[labelCount-1].length += newLen;
         }
         wcscpy_s(tmp, (textBufferEnd-tmp), text);
-        keyLabels[labelCount-1].time = labelSettings.lingerTime+labelSettings.fadeDuration;
-        updateLabel(labelCount-1);
-
-        newStrokeCount = labelSettings.keyStrokeDelay;
     }
-    SIZE wndSize = {0, desktopSize.cy};
-    for(i = 0; i < labelCount; i++) {
-        RectF &rt = keyLabels[i].rect;
-        if(keyLabels[i].time > 0 || keyLabels[i].length > 0) {
-            wndSize.cx = max(wndSize.cx, (LONG)rt.Width+2*labelSettings.borderSize+1);
+    keyLabels[labelCount-1].time = labelSettings.lingerTime+labelSettings.fadeDuration;
+    updateLabel(labelCount-1);
+    newStrokeCount = labelSettings.keyStrokeDelay;
+    if(behavior != 2) {
+        SIZE wndSize = {0, desktopSize.cy};
+        for(i = 0; i < labelCount; i++) {
+            RectF &rt = keyLabels[i].rect;
+            if(keyLabels[i].time > 0 || keyLabels[i].length > 0) {
+                wndSize.cx = max(wndSize.cx, (LONG)rt.Width+2*labelSettings.borderSize+1);
+            }
         }
+        updateLayeredWindow(hMainWnd, deskOrigin, wndSize);
     }
-    updateLayeredWindow(hMainWnd, deskOrigin, wndSize);
 }
 
 BOOL ColorDialog ( HWND hWnd, COLORREF &clr ) {
@@ -444,7 +445,9 @@ void initSettings() {
             desktopSize.cx - settingsDlgRect.right + settingsDlgRect.left,
             desktopSize.cy - settingsDlgRect.bottom + settingsDlgRect.top, 0, 0, SWP_NOSIZE);
     visibleShift = FALSE;
+    visibleModifier = TRUE;
     mouseCapturing = TRUE;
+    mouseCapturingMod = FALSE;
     onlyCommandKeys = FALSE;
     tcModifiers = MOD_ALT;
     tcKey = 0x42;
@@ -481,7 +484,9 @@ BOOL saveSettings() {
     RegSetKeyValue(hChildKey, NULL, L"offsetX", REG_DWORD, (LPCVOID)&deskOrigin.x, sizeof(deskOrigin.x));
     RegSetKeyValue(hChildKey, NULL, L"offsetY", REG_DWORD, (LPCVOID)&deskOrigin.y, sizeof(deskOrigin.y));
     RegSetKeyValue(hChildKey, NULL, L"visibleShift", REG_DWORD, (LPCVOID)&visibleShift, sizeof(visibleShift));
+    RegSetKeyValue(hChildKey, NULL, L"visibleModifier", REG_DWORD, (LPCVOID)&visibleModifier, sizeof(visibleModifier));
     RegSetKeyValue(hChildKey, NULL, L"mouseCapturing", REG_DWORD, (LPCVOID)&mouseCapturing, sizeof(mouseCapturing));
+    RegSetKeyValue(hChildKey, NULL, L"mouseCapturingMod", REG_DWORD, (LPCVOID)&mouseCapturingMod, sizeof(mouseCapturingMod));
     RegSetKeyValue(hChildKey, NULL, L"onlyCommandKeys", REG_DWORD, (LPCVOID)&onlyCommandKeys, sizeof(onlyCommandKeys));
     RegSetKeyValue(hChildKey, NULL, L"tcModifiers", REG_DWORD, (LPCVOID)&tcModifiers, sizeof(tcModifiers));
     RegSetKeyValue(hChildKey, NULL, L"tcKey", REG_DWORD, (LPCVOID)&tcKey, sizeof(tcKey));
@@ -523,7 +528,9 @@ BOOL loadSettings() {
         RegGetValue(hChildKey, NULL, L"offsetX", RRF_RT_DWORD, NULL, &deskOrigin.x, &size);
         RegGetValue(hChildKey, NULL, L"offsetY", RRF_RT_DWORD, NULL, &deskOrigin.y, &size);
         RegGetValue(hChildKey, NULL, L"visibleShift", RRF_RT_DWORD, NULL, &visibleShift, &size);
+        RegGetValue(hChildKey, NULL, L"visibleModifier", RRF_RT_DWORD, NULL, &visibleModifier, &size);
         RegGetValue(hChildKey, NULL, L"mouseCapturing", RRF_RT_DWORD, NULL, &mouseCapturing, &size);
+        RegGetValue(hChildKey, NULL, L"mouseCapturingMod", RRF_RT_DWORD, NULL, &mouseCapturingMod, &size);
         RegGetValue(hChildKey, NULL, L"onlyCommandKeys", RRF_RT_DWORD, NULL, &onlyCommandKeys, &size);
         RegGetValue(hChildKey, NULL, L"tcModifiers", RRF_RT_DWORD, NULL, &tcModifiers, &size);
         RegGetValue(hChildKey, NULL, L"tcKey", RRF_RT_DWORD, NULL, &tcKey, &size);
@@ -573,7 +580,9 @@ void renderSettingsData(HWND hwndDlg) {
     SetDlgItemText(hwndDlg, IDC_BRANDING, branding);
     SetDlgItemText(hwndDlg, IDC_COMBSCHEME, comboChars);
     CheckDlgButton(hwndDlg, IDC_VISIBLESHIFT, visibleShift ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwndDlg, IDC_VISIBLEMODIFIER, visibleModifier ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_MOUSECAPTURING, mouseCapturing ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwndDlg, IDC_MOUSECAPTURINGMOD, mouseCapturingMod ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_ONLYCOMMANDKEYS, onlyCommandKeys ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_MODCTRL, (tcModifiers & MOD_CONTROL) ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_MODALT, (tcModifiers & MOD_ALT) ? BST_CHECKED : BST_UNCHECKED);
@@ -780,7 +789,9 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     GetDlgItemText(hwndDlg, IDC_BRANDING, branding, BRANDINGMAX);
                     GetDlgItemText(hwndDlg, IDC_COMBSCHEME, comboChars, 4);
                     visibleShift = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_VISIBLESHIFT));
+                    visibleModifier = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_VISIBLEMODIFIER));
                     mouseCapturing = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MOUSECAPTURING));
+                    mouseCapturingMod = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MOUSECAPTURINGMOD));
                     onlyCommandKeys = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_ONLYCOMMANDKEYS));
                     tcModifiers = 0;
                     if(BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MODCTRL)) {
@@ -1038,13 +1049,13 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     while( GetMessage(&msg, NULL, 0, 0) )    {
         if (msg.message == WM_HOTKEY) {
             if(kbdhook) {
-                showText(L"\u263b - KeyCastOW OFF", TRUE);
+                showText(L"\u263b - KeyCastOW OFF", 1);
                 UnhookWindowsHookEx(kbdhook);
                 kbdhook = NULL;
                 UnhookWindowsHookEx(moshook);
                 moshook = NULL;
             } else {
-                showText(L"\u263b - KeyCastOW ON", TRUE);
+                showText(L"\u263b - KeyCastOW ON", 1);
                 kbdhook = SetWindowsHookEx(WH_KEYBOARD_LL, LLKeyboardProc, hInstance, NULL);
                 moshook = SetWindowsHookEx(WH_MOUSE_LL, LLMouseProc, hThisInst, 0);
             }
