@@ -163,6 +163,7 @@ extern BOOL visibleShift;
 extern BOOL visibleModifier;
 extern BOOL mouseCapturing;
 extern BOOL mouseCapturingMod;
+extern BOOL keyAutoRepeat;
 extern BOOL onlyCommandKeys;
 extern WCHAR comboChars[3];
 HHOOK kbdhook, moshook;
@@ -266,8 +267,10 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
         return CallNextHookEx(kbdhook, nCode, wp, lp);
 
     static int fin = 0;
+    static DWORD lastvk = 0;
     UINT spk = visibleShift ? 0xA0 : 0xA2;
     if(wp == WM_KEYUP || wp == WM_SYSKEYUP) {
+        lastvk = 0;
         if(k.vkCode >= spk && k.vkCode <= 0xA5 ||
                 k.vkCode == 0x5B || k.vkCode == 0x5C) {
             if(fin == 0 && modifierkey[0] != '\0' && visibleModifier) {
@@ -278,6 +281,11 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
             cleanModifier(k.vkCode, modifierkey);
         }
     } else if(wp == WM_KEYDOWN || wp == WM_SYSKEYDOWN) {
+        if(!keyAutoRepeat && lastvk == k.vkCode) {
+            return TRUE;
+        } else {
+            lastvk = k.vkCode;
+        }
         fin = 0;
         if(k.vkCode >= spk && k.vkCode <= 0xA5 ||          // ctrl / alt
                 k.vkCode == 0x5B || k.vkCode == 0x5C) {     // win

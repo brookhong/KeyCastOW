@@ -75,6 +75,7 @@ BOOL visibleShift = FALSE;
 BOOL visibleModifier = TRUE;
 BOOL mouseCapturing = TRUE;
 BOOL mouseCapturingMod = FALSE;
+BOOL keyAutoRepeat = TRUE;
 BOOL onlyCommandKeys = FALSE;
 UINT tcModifiers = MOD_ALT;
 UINT tcKey = 0x42;      // 0x42 is 'b'
@@ -448,6 +449,7 @@ void initSettings() {
     visibleModifier = TRUE;
     mouseCapturing = TRUE;
     mouseCapturingMod = FALSE;
+    keyAutoRepeat = TRUE;
     onlyCommandKeys = FALSE;
     tcModifiers = MOD_ALT;
     tcKey = 0x42;
@@ -487,6 +489,7 @@ BOOL saveSettings() {
     RegSetKeyValue(hChildKey, NULL, L"visibleModifier", REG_DWORD, (LPCVOID)&visibleModifier, sizeof(visibleModifier));
     RegSetKeyValue(hChildKey, NULL, L"mouseCapturing", REG_DWORD, (LPCVOID)&mouseCapturing, sizeof(mouseCapturing));
     RegSetKeyValue(hChildKey, NULL, L"mouseCapturingMod", REG_DWORD, (LPCVOID)&mouseCapturingMod, sizeof(mouseCapturingMod));
+    RegSetKeyValue(hChildKey, NULL, L"keyAutoRepeat", REG_DWORD, (LPCVOID)&keyAutoRepeat, sizeof(keyAutoRepeat));
     RegSetKeyValue(hChildKey, NULL, L"onlyCommandKeys", REG_DWORD, (LPCVOID)&onlyCommandKeys, sizeof(onlyCommandKeys));
     RegSetKeyValue(hChildKey, NULL, L"tcModifiers", REG_DWORD, (LPCVOID)&tcModifiers, sizeof(tcModifiers));
     RegSetKeyValue(hChildKey, NULL, L"tcKey", REG_DWORD, (LPCVOID)&tcKey, sizeof(tcKey));
@@ -531,6 +534,7 @@ BOOL loadSettings() {
         RegGetValue(hChildKey, NULL, L"visibleModifier", RRF_RT_DWORD, NULL, &visibleModifier, &size);
         RegGetValue(hChildKey, NULL, L"mouseCapturing", RRF_RT_DWORD, NULL, &mouseCapturing, &size);
         RegGetValue(hChildKey, NULL, L"mouseCapturingMod", RRF_RT_DWORD, NULL, &mouseCapturingMod, &size);
+        RegGetValue(hChildKey, NULL, L"keyAutoRepeat", RRF_RT_DWORD, NULL, &keyAutoRepeat, &size);
         RegGetValue(hChildKey, NULL, L"onlyCommandKeys", RRF_RT_DWORD, NULL, &onlyCommandKeys, &size);
         RegGetValue(hChildKey, NULL, L"tcModifiers", RRF_RT_DWORD, NULL, &tcModifiers, &size);
         RegGetValue(hChildKey, NULL, L"tcKey", RRF_RT_DWORD, NULL, &tcKey, &size);
@@ -583,6 +587,7 @@ void renderSettingsData(HWND hwndDlg) {
     CheckDlgButton(hwndDlg, IDC_VISIBLEMODIFIER, visibleModifier ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_MOUSECAPTURING, mouseCapturing ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_MOUSECAPTURINGMOD, mouseCapturingMod ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwndDlg, IDC_KEYAUTOREPEAT, keyAutoRepeat ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_ONLYCOMMANDKEYS, onlyCommandKeys ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_MODCTRL, (tcModifiers & MOD_CONTROL) ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_MODALT, (tcModifiers & MOD_ALT) ? BST_CHECKED : BST_UNCHECKED);
@@ -792,6 +797,7 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     visibleModifier = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_VISIBLEMODIFIER));
                     mouseCapturing = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MOUSECAPTURING));
                     mouseCapturingMod = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MOUSECAPTURINGMOD));
+                    keyAutoRepeat = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_KEYAUTOREPEAT));
                     onlyCommandKeys = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_ONLYCOMMANDKEYS));
                     tcModifiers = 0;
                     if(BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MODCTRL)) {
