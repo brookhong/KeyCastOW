@@ -164,6 +164,7 @@ extern BOOL visibleModifier;
 extern BOOL mouseCapturing;
 extern BOOL mouseCapturingMod;
 extern BOOL keyAutoRepeat;
+extern BOOL mergeMouseActions;
 extern BOOL onlyCommandKeys;
 extern WCHAR comboChars[3];
 HHOOK kbdhook, moshook;
@@ -338,27 +339,31 @@ LRESULT CALLBACK LLMouseProc(int nCode, WPARAM wp, LPARAM lp)
         MSLLHOOKSTRUCT* ms = reinterpret_cast<MSLLHOOKSTRUCT*>(lp);
 
         if (!(ms->flags & LLMHF_INJECTED)) {
-            switch (idx) {
-                case 1:
-                case 4:
-                case 7:
-                    swprintf(c, 64, mouseActions[idx]);
-                    mouseButtonDown = GetTickCount();
-                    behavior = 2;
-                    break;
-                case 2:
-                case 5:
-                case 8:
-                    behavior = 3;
-                    if(GetTickCount() - mouseButtonDown > 200) {
+            if(mergeMouseActions) {
+                switch (idx) {
+                    case 1:
+                    case 4:
+                    case 7:
                         swprintf(c, 64, mouseActions[idx]);
-                    } else {
-                        swprintf(c, 64, mouseVirtualActions[(idx-2)/3]);
-                    }
-                    break;
-                default:
-                    swprintf(c, 64, mouseActions[idx]);
-                    break;
+                        mouseButtonDown = GetTickCount();
+                        behavior = 2;
+                        break;
+                    case 2:
+                    case 5:
+                    case 8:
+                        behavior = 3;
+                        if(GetTickCount() - mouseButtonDown > 200) {
+                            swprintf(c, 64, mouseActions[idx]);
+                        } else {
+                            swprintf(c, 64, mouseVirtualActions[(idx-2)/3]);
+                        }
+                        break;
+                    default:
+                        swprintf(c, 64, mouseActions[idx]);
+                        break;
+                }
+            } else {
+                swprintf(c, 64, mouseActions[idx]);
             }
 
             if(modifierkey[0] != '\0') {

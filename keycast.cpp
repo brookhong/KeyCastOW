@@ -76,6 +76,7 @@ BOOL visibleModifier = TRUE;
 BOOL mouseCapturing = TRUE;
 BOOL mouseCapturingMod = FALSE;
 BOOL keyAutoRepeat = TRUE;
+BOOL mergeMouseActions = FALSE;
 BOOL onlyCommandKeys = FALSE;
 UINT tcModifiers = MOD_ALT;
 UINT tcKey = 0x42;      // 0x42 is 'b'
@@ -388,6 +389,9 @@ void updateMainWindow() {
     if(labelCount > maximumLines) {
         offset = labelCount-maximumLines;
         labelCount = maximumLines;
+    } else if(labelCount == 0) {
+        offset = labelCount-1;
+        labelCount = 1;
     }
 
     g->Clear(Color::Color(0, 0x7f,0,0x8f));
@@ -450,6 +454,7 @@ void initSettings() {
     mouseCapturing = TRUE;
     mouseCapturingMod = FALSE;
     keyAutoRepeat = TRUE;
+    mergeMouseActions = FALSE;
     onlyCommandKeys = FALSE;
     tcModifiers = MOD_ALT;
     tcKey = 0x42;
@@ -490,6 +495,7 @@ BOOL saveSettings() {
     RegSetKeyValue(hChildKey, NULL, L"mouseCapturing", REG_DWORD, (LPCVOID)&mouseCapturing, sizeof(mouseCapturing));
     RegSetKeyValue(hChildKey, NULL, L"mouseCapturingMod", REG_DWORD, (LPCVOID)&mouseCapturingMod, sizeof(mouseCapturingMod));
     RegSetKeyValue(hChildKey, NULL, L"keyAutoRepeat", REG_DWORD, (LPCVOID)&keyAutoRepeat, sizeof(keyAutoRepeat));
+    RegSetKeyValue(hChildKey, NULL, L"mergeMouseActions", REG_DWORD, (LPCVOID)&mergeMouseActions, sizeof(mergeMouseActions));
     RegSetKeyValue(hChildKey, NULL, L"onlyCommandKeys", REG_DWORD, (LPCVOID)&onlyCommandKeys, sizeof(onlyCommandKeys));
     RegSetKeyValue(hChildKey, NULL, L"tcModifiers", REG_DWORD, (LPCVOID)&tcModifiers, sizeof(tcModifiers));
     RegSetKeyValue(hChildKey, NULL, L"tcKey", REG_DWORD, (LPCVOID)&tcKey, sizeof(tcKey));
@@ -535,6 +541,7 @@ BOOL loadSettings() {
         RegGetValue(hChildKey, NULL, L"mouseCapturing", RRF_RT_DWORD, NULL, &mouseCapturing, &size);
         RegGetValue(hChildKey, NULL, L"mouseCapturingMod", RRF_RT_DWORD, NULL, &mouseCapturingMod, &size);
         RegGetValue(hChildKey, NULL, L"keyAutoRepeat", RRF_RT_DWORD, NULL, &keyAutoRepeat, &size);
+        RegGetValue(hChildKey, NULL, L"mergeMouseActions", RRF_RT_DWORD, NULL, &mergeMouseActions, &size);
         RegGetValue(hChildKey, NULL, L"onlyCommandKeys", RRF_RT_DWORD, NULL, &onlyCommandKeys, &size);
         RegGetValue(hChildKey, NULL, L"tcModifiers", RRF_RT_DWORD, NULL, &tcModifiers, &size);
         RegGetValue(hChildKey, NULL, L"tcKey", RRF_RT_DWORD, NULL, &tcKey, &size);
@@ -588,6 +595,7 @@ void renderSettingsData(HWND hwndDlg) {
     CheckDlgButton(hwndDlg, IDC_MOUSECAPTURING, mouseCapturing ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_MOUSECAPTURINGMOD, mouseCapturingMod ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_KEYAUTOREPEAT, keyAutoRepeat ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwndDlg, IDC_MERGEMOUSEACTIONS, mergeMouseActions ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_ONLYCOMMANDKEYS, onlyCommandKeys ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_MODCTRL, (tcModifiers & MOD_CONTROL) ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_MODALT, (tcModifiers & MOD_ALT) ? BST_CHECKED : BST_UNCHECKED);
@@ -620,7 +628,7 @@ void getLabelSettings(HWND hwndDlg, LabelSettings &lblSettings) {
     lblSettings.borderSize = _wtoi(tmp);
     GetDlgItemText(hwndDlg, IDC_CORNERSIZE, tmp, 256);
     lblSettings.cornerSize = _wtoi(tmp);
-    lblSettings.cornerSize = (lblSettings.cornerSize - lblSettings.borderSize > 0) ? lblSettings.cornerSize : lblSettings.borderSize + 1;
+    lblSettings.cornerSize = (lblSettings.cornerSize > lblSettings.borderSize ) ? lblSettings.cornerSize : lblSettings.borderSize + 1;
 }
 DWORD previewTime = 0;
 #define PREVIEWTIMER_INTERVAL 5
@@ -782,6 +790,9 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     labelSettings = previewLabelSettings;
                     GetDlgItemText(hwndDlg, IDC_LABELSPACING, tmp, 256);
                     labelSpacing = _wtoi(tmp);
+                    if(labelSpacing > (DWORD)desktopSize.cy/3) {
+                        labelSpacing = (DWORD)desktopSize.cy/3;
+                    }
                     GetDlgItemText(hwndDlg, IDC_MAXIMUMLINES, tmp, 256);
                     maximumLines = _wtoi(tmp);
                     if(maximumLines > MAXLABELS) {
@@ -798,6 +809,7 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     mouseCapturing = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MOUSECAPTURING));
                     mouseCapturingMod = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MOUSECAPTURINGMOD));
                     keyAutoRepeat = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_KEYAUTOREPEAT));
+                    mergeMouseActions = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MERGEMOUSEACTIONS));
                     onlyCommandKeys = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_ONLYCOMMANDKEYS));
                     tcModifiers = 0;
                     if(BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MODCTRL)) {
