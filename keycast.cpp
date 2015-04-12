@@ -27,6 +27,7 @@ struct KeyLabel {
     WCHAR *text;
     DWORD length;
     DWORD time;
+    BOOL fade;
     KeyLabel() {
         text = textBuffer;
         length = 0;
@@ -232,10 +233,14 @@ static void startFade() {
     for(i = 0; i < labelCount; i++) {
         RectF &rt = keyLabels[i].rect;
         if(keyLabels[i].time > labelSettings.fadeDuration) {
-            keyLabels[i].time -= SHOWTIMER_INTERVAL;
+            if(keyLabels[i].fade) {
+                keyLabels[i].time -= SHOWTIMER_INTERVAL;
+            }
             wndSize.cx = max(wndSize.cx, (LONG)rt.Width+2*labelSettings.borderSize+1);
         } else if(keyLabels[i].time >= SHOWTIMER_INTERVAL) {
-            keyLabels[i].time -= SHOWTIMER_INTERVAL;
+            if(keyLabels[i].fade) {
+                keyLabels[i].time -= SHOWTIMER_INTERVAL;
+            }
             updateLabel(i);
             dirty = TRUE;
             wndSize.cx = max(wndSize.cx, (LONG)rt.Width+2*labelSettings.borderSize+1);
@@ -276,14 +281,23 @@ bool outOfLine(LPCWSTR text) {
 #endif
     return out;
 }
+void fadeLastLabel(BOOL weither) {
+    keyLabels[labelCount-1].fade = weither;
+}
+/*
+ * behavior 0: append text to last label
+ * behavior 1: create a new label with text
+ * behavior 2: create a new label with text, but don't show it immediately
+ * behavior 3: replace last label with text
+ */
 void showText(LPCWSTR text, int behavior = 0) {
     SetWindowPos(hMainWnd,HWND_TOPMOST,0,0,0,0,SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE);
     size_t newLen = wcslen(text);
     DWORD i;
-    if(behavior > 2) {
+    if(behavior == 3) {
         wcscpy_s(keyLabels[labelCount-1].text, textBufferEnd-keyLabels[labelCount-1].text, text);
         keyLabels[labelCount-1].length = newLen;
-    } else if (behavior > 0 || (newStrokeCount <= 0) || outOfLine(text)) {
+    } else if (behavior == 1 || behavior == 2 || (newStrokeCount <= 0) || outOfLine(text)) {
         for (i = 1; i < labelCount; i++) {
             if(keyLabels[i].time > 0) {
                 break;
@@ -294,6 +308,7 @@ void showText(LPCWSTR text, int behavior = 0) {
             keyLabels[i-1].text = keyLabels[i].text;
             keyLabels[i-1].length = keyLabels[i].length;
             keyLabels[i-1].time = keyLabels[i].time;
+            keyLabels[i-1].fade = TRUE;
             updateLabel(i-1);
             eraseLabel(i);
         }
@@ -303,8 +318,6 @@ void showText(LPCWSTR text, int behavior = 0) {
         if(keyLabels[labelCount-1].text+newLen >= textBufferEnd) {
             keyLabels[labelCount-1].text = textBuffer;
         }
-        //swprintf(branding, BRANDINGMAX, L"%0x", keyLabels[labelCount-1].text);
-        //stamp(hWndStamp, branding);
         wcscpy_s(keyLabels[labelCount-1].text, textBufferEnd-keyLabels[labelCount-1].text, text);
         keyLabels[labelCount-1].length = newLen;
     } else {
@@ -319,6 +332,7 @@ void showText(LPCWSTR text, int behavior = 0) {
         wcscpy_s(tmp, (textBufferEnd-tmp), text);
     }
     keyLabels[labelCount-1].time = labelSettings.lingerTime+labelSettings.fadeDuration;
+    keyLabels[labelCount-1].fade = TRUE;
     updateLabel(labelCount-1);
     newStrokeCount = labelSettings.keyStrokeDelay;
     if(behavior != 2) {

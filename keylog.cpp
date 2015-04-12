@@ -169,6 +169,7 @@ extern BOOL onlyCommandKeys;
 extern WCHAR comboChars[3];
 HHOOK kbdhook, moshook;
 void showText(LPCWSTR text, int behavior = 0);
+void fadeLastLabel(BOOL weither);
 
 LPCWSTR GetSymbolFromVK(UINT vk, UINT sc, BOOL mod) {
     static WCHAR symbol[32];
@@ -272,17 +273,14 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
     UINT spk = visibleShift ? 0xA0 : 0xA2;
     if(wp == WM_KEYUP || wp == WM_SYSKEYUP) {
         lastvk = 0;
+        fadeLastLabel(TRUE);
         if(k.vkCode >= spk && k.vkCode <= 0xA5 ||
                 k.vkCode == 0x5B || k.vkCode == 0x5C) {
-            if(fin == 0 && modifierkey[0] != '\0' && visibleModifier) {
-                // show Ctrl/Alt/Win keys only when they're not used as modifier.
-                swprintf(c, 64, L"%c%s%c", comboChars[0], modifierkey, comboChars[2]);
-                showText(c, 1);
-            }
             cleanModifier(k.vkCode, modifierkey);
         }
     } else if(wp == WM_KEYDOWN || wp == WM_SYSKEYDOWN) {
         if(!keyAutoRepeat && lastvk == k.vkCode) {
+            fadeLastLabel(FALSE);
             return TRUE;
         } else {
             lastvk = k.vkCode;
@@ -296,6 +294,10 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
             } else if(!wcsstr(modifierkey, ck)) {
                 wcscpy_s(tmp, 64, modifierkey);
                 swprintf(modifierkey, 64, L"%s %c %s", tmp, comboChars[1], ck);
+            }
+            if(visibleModifier) {
+                swprintf(c, 64, L"%c%s%c", comboChars[0], modifierkey, comboChars[2]);
+                showText(c, 1);
             }
         } else {
             WORD a = 0;
@@ -313,7 +315,7 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
 
             if(theKey) {
                 if(mod) {
-                    fin = 1;
+                    fin = 3;
                     swprintf(tmp, 64, L"%c%s %c %s%c", comboChars[0], modifierkey, comboChars[1], theKey, comboChars[2]);
                     theKey = tmp;
                 }
@@ -368,7 +370,7 @@ LRESULT CALLBACK LLMouseProc(int nCode, WPARAM wp, LPARAM lp)
 
             if(modifierkey[0] != '\0') {
                 swprintf(tmp, 64, L"%c%s %c %s%c", comboChars[0], modifierkey, comboChars[1], c, comboChars[2]);
-                showText(tmp, behavior);
+                showText(tmp, 3);
             } else if(!mouseCapturingMod) {
                 swprintf(tmp, 64, L"%c%s%c", comboChars[0], c, comboChars[2]);
                 showText(tmp, behavior);
