@@ -268,7 +268,6 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
     if(nCode < 0)
         return CallNextHookEx(kbdhook, nCode, wp, lp);
 
-    static int fin = 0;
     static DWORD lastvk = 0;
     UINT spk = visibleShift ? 0xA0 : 0xA2;
     if(wp == WM_KEYUP || wp == WM_SYSKEYUP) {
@@ -285,7 +284,7 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
         } else {
             lastvk = k.vkCode;
         }
-        fin = 0;
+        int fin = 0;
         if(k.vkCode >= spk && k.vkCode <= 0xA5 ||          // ctrl / alt
                 k.vkCode == 0x5B || k.vkCode == 0x5C) {     // win
             LPCWSTR ck = getSpecialKey(k.vkCode);
@@ -315,7 +314,7 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
 
             if(theKey) {
                 if(mod) {
-                    fin = 3;
+                    fin = 2;
                     swprintf(tmp, 64, L"%c%s %c %s%c", comboChars[0], modifierkey, comboChars[1], theKey, comboChars[2]);
                     theKey = tmp;
                 }
@@ -348,15 +347,14 @@ LRESULT CALLBACK LLMouseProc(int nCode, WPARAM wp, LPARAM lp)
                     case 7:
                         swprintf(c, 64, mouseActions[idx]);
                         mouseButtonDown = GetTickCount();
-                        behavior = 2;
                         break;
                     case 2:
                     case 5:
                     case 8:
-                        behavior = 3;
                         if(GetTickCount() - mouseButtonDown > 200) {
                             swprintf(c, 64, mouseActions[idx]);
                         } else {
+                            behavior = 2;
                             swprintf(c, 64, mouseVirtualActions[(idx-2)/3]);
                         }
                         break;
@@ -370,7 +368,7 @@ LRESULT CALLBACK LLMouseProc(int nCode, WPARAM wp, LPARAM lp)
 
             if(modifierkey[0] != '\0') {
                 swprintf(tmp, 64, L"%c%s %c %s%c", comboChars[0], modifierkey, comboChars[1], c, comboChars[2]);
-                showText(tmp, 3);
+                showText(tmp, 2);
             } else if(!mouseCapturingMod) {
                 swprintf(tmp, 64, L"%c%s%c", comboChars[0], c, comboChars[2]);
                 showText(tmp, behavior);

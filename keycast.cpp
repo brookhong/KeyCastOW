@@ -285,17 +285,16 @@ void fadeLastLabel(BOOL weither) {
 /*
  * behavior 0: append text to last label
  * behavior 1: create a new label with text
- * behavior 2: create a new label with text, but don't show it immediately
- * behavior 3: replace last label with text
+ * behavior 2: replace last label with text
  */
 void showText(LPCWSTR text, int behavior = 0) {
     SetWindowPos(hMainWnd,HWND_TOPMOST,0,0,0,0,SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE);
     size_t newLen = wcslen(text);
     DWORD i;
-    if(behavior == 3) {
+    if(behavior == 2) {
         wcscpy_s(keyLabels[labelCount-1].text, textBufferEnd-keyLabels[labelCount-1].text, text);
         keyLabels[labelCount-1].length = newLen;
-    } else if (behavior == 1 || behavior == 2 || (newStrokeCount <= 0) || outOfLine(text)) {
+    } else if (behavior == 1 || (newStrokeCount <= 0) || outOfLine(text)) {
         for (i = 1; i < labelCount; i++) {
             if(keyLabels[i].time > 0) {
                 break;
@@ -334,10 +333,8 @@ void showText(LPCWSTR text, int behavior = 0) {
     keyLabels[labelCount-1].fade = TRUE;
     updateLabel(labelCount-1);
     newStrokeCount = labelSettings.keyStrokeDelay;
-    if(behavior != 2) {
-        SIZE wndSize = {desktopSize.cx-deskOrigin.x, desktopSize.cy};
-        updateLayeredWindow(hMainWnd, deskOrigin, wndSize);
-    }
+    SIZE wndSize = {desktopSize.cx-deskOrigin.x, desktopSize.cy};
+    updateLayeredWindow(hMainWnd, deskOrigin, wndSize);
 }
 
 BOOL ColorDialog ( HWND hWnd, COLORREF &clr ) {
