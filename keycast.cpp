@@ -198,6 +198,7 @@ void updateLabel(int i) {
         PointF origin(rc.X, rc.Y);
         g->MeasureString(keyLabels[i].text, keyLabels[i].length, fontPlus, origin, &rc);
         rc.Width = (rc.Width < labelSettings.cornerSize) ? labelSettings.cornerSize : rc.Width;
+        rc.X = (desktopSize.cx-deskOrigin.x) - rc.Width - labelSettings.borderSize;
         rc.Height = (rc.Height < labelSettings.cornerSize) ? labelSettings.cornerSize : rc.Height;
         int bgAlpha = (int)(r*labelSettings.bgOpacity), textAlpha = (int)(r*labelSettings.textOpacity), borderAlpha = (int)(r*labelSettings.borderOpacity);
         GraphicsPath path;
@@ -216,7 +217,7 @@ void updateLabel(int i) {
         g->DrawString( keyLabels[i].text,
                 keyLabels[i].length,
                 fontPlus,
-                origin,
+                PointF(rc.X, rc.Y),
                 &textBrushPlus);
     }
 }
@@ -229,31 +230,28 @@ static void startFade() {
     }
     DWORD i = 0;
     BOOL dirty = FALSE;
-    SIZE wndSize = {0, desktopSize.cy};
     for(i = 0; i < labelCount; i++) {
         RectF &rt = keyLabels[i].rect;
         if(keyLabels[i].time > labelSettings.fadeDuration) {
             if(keyLabels[i].fade) {
                 keyLabels[i].time -= SHOWTIMER_INTERVAL;
             }
-            wndSize.cx = max(wndSize.cx, (LONG)rt.Width+2*labelSettings.borderSize+1);
         } else if(keyLabels[i].time >= SHOWTIMER_INTERVAL) {
             if(keyLabels[i].fade) {
                 keyLabels[i].time -= SHOWTIMER_INTERVAL;
             }
             updateLabel(i);
             dirty = TRUE;
-            wndSize.cx = max(wndSize.cx, (LONG)rt.Width+2*labelSettings.borderSize+1);
         } else {
             keyLabels[i].time = 0;
             if(keyLabels[i].length){
                 eraseLabel(i);
                 keyLabels[i].length = 0;
-                wndSize.cx = max(wndSize.cx, (LONG)rt.Width+2*labelSettings.borderSize+1);
             }
         }
     }
     if(dirty) {
+        SIZE wndSize = {desktopSize.cx-deskOrigin.x, desktopSize.cy};
         updateLayeredWindow(hMainWnd, deskOrigin, wndSize);
     }
 }
@@ -308,6 +306,7 @@ void showText(LPCWSTR text, int behavior = 0) {
             keyLabels[i-1].text = keyLabels[i].text;
             keyLabels[i-1].length = keyLabels[i].length;
             keyLabels[i-1].time = keyLabels[i].time;
+            keyLabels[i-1].rect.X = keyLabels[i].rect.X;
             keyLabels[i-1].fade = TRUE;
             updateLabel(i-1);
             eraseLabel(i);
@@ -336,13 +335,7 @@ void showText(LPCWSTR text, int behavior = 0) {
     updateLabel(labelCount-1);
     newStrokeCount = labelSettings.keyStrokeDelay;
     if(behavior != 2) {
-        SIZE wndSize = {0, desktopSize.cy};
-        for(i = 0; i < labelCount; i++) {
-            RectF &rt = keyLabels[i].rect;
-            if(keyLabels[i].time > 0 || keyLabels[i].length > 0) {
-                wndSize.cx = max(wndSize.cx, (LONG)rt.Width+2*labelSettings.borderSize+1);
-            }
-        }
+        SIZE wndSize = {desktopSize.cx-deskOrigin.x, desktopSize.cy};
         updateLayeredWindow(hMainWnd, deskOrigin, wndSize);
     }
 }
