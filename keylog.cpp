@@ -151,10 +151,15 @@ LPCWSTR mouseActions[] = {
     L"XButtonDBLCLK",
     L"MouseHWheel"
 };
-LPCWSTR mouseVirtualActions[] = {
+LPCWSTR mouseClicks[] = {
     L"LClick",
     L"RClick",
     L"MClick"
+};
+LPCWSTR mouseDblClicks[] = {
+    L"LDblClick",
+    L"RDblClick",
+    L"MDblClick"
 };
 
 size_t nMouseActions = sizeof(mouseActions) / sizeof(LPCWSTR);
@@ -336,6 +341,7 @@ LRESULT CALLBACK LLMouseProc(int nCode, WPARAM wp, LPARAM lp)
     UINT idx = wp - WM_MOUSEFIRST;
     int behavior = 1;
     static DWORD mouseButtonDown = 0;
+    static DWORD lastClick = 0;
     if ((mouseCapturing || mouseCapturingMod) && idx > 0 && idx < nMouseActions && nCode == HC_ACTION) {
         MSLLHOOKSTRUCT* ms = reinterpret_cast<MSLLHOOKSTRUCT*>(lp);
 
@@ -347,19 +353,35 @@ LRESULT CALLBACK LLMouseProc(int nCode, WPARAM wp, LPARAM lp)
                     case 7:
                         swprintf(c, 64, mouseActions[idx]);
                         mouseButtonDown = GetTickCount();
+                        if(lastClick > 0 && (GetTickCount() - lastClick) <= GetDoubleClickTime()) {
+                            behavior = 2;
+                        }
                         break;
                     case 2:
                     case 5:
                     case 8:
                         if(GetTickCount() - mouseButtonDown > 200) {
                             swprintf(c, 64, mouseActions[idx]);
+                            lastClick = 0;
                         } else {
                             behavior = 2;
-                            swprintf(c, 64, mouseVirtualActions[(idx-2)/3]);
+                            if(lastClick > 0) {
+                                if((GetTickCount() - lastClick) <= GetDoubleClickTime()) {
+                                    swprintf(c, 64, mouseDblClicks[(idx-2)/3]);
+                                } else {
+                                    swprintf(c, 64, mouseClicks[(idx-2)/3]);
+                                }
+                                lastClick = 0;
+                            } else {
+                                lastClick = GetTickCount();
+                                swprintf(c, 64, mouseClicks[(idx-2)/3]);
+                            }
                         }
+                        mouseButtonDown = 0;
                         break;
                     default:
                         swprintf(c, 64, mouseActions[idx]);
+                        mouseButtonDown = 0;
                         break;
                 }
             } else {
@@ -372,6 +394,7 @@ LRESULT CALLBACK LLMouseProc(int nCode, WPARAM wp, LPARAM lp)
             } else if(!mouseCapturingMod) {
                 swprintf(tmp, 64, L"%c%s%c", comboChars[0], c, comboChars[2]);
                 showText(tmp, behavior);
+                fadeLastLabel((mouseButtonDown == 0));
             }
         }
     }
