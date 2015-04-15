@@ -77,7 +77,8 @@ BOOL visibleModifier = TRUE;
 BOOL mouseCapturing = TRUE;
 BOOL mouseCapturingMod = FALSE;
 BOOL keyAutoRepeat = TRUE;
-BOOL mergeMouseActions = FALSE;
+BOOL mergeMouseActions = TRUE;
+int alignment = 1;
 BOOL onlyCommandKeys = FALSE;
 UINT tcModifiers = MOD_ALT;
 UINT tcKey = 0x42;      // 0x42 is 'b'
@@ -112,7 +113,8 @@ Font * fontPlus = NULL;
 #ifdef _DEBUG
 #include <sstream>
 void log(char * fileName, const std::stringstream & line) {
-    FILE *stream = fopen(fileName,"a");
+    FILE *stream;
+    errno_t err = fopen_s(&stream, fileName, "a");
     fprintf(stream,"%s",line.str().c_str());
     fclose(stream);
 }
@@ -160,7 +162,16 @@ void stamp(HWND hwnd, LPCWSTR text) {
     ::DeleteObject(memBitmap);
     ReleaseDC(hwnd, hdc);
 }
-void updateLayeredWindow(HWND hwnd, POINT &ptDst, SIZE &wndSize) {
+void updateLayeredWindow(HWND hwnd) {
+    SIZE wndSize = {0, desktopSize.cy};
+    int ox = deskOrigin.x%desktopSize.cx;
+    POINT ptDst = {ox, deskOrigin.y};
+    if(alignment) {
+        wndSize.cx = ox > 0 ? ox : (ox + desktopSize.cx);
+        ptDst.x = ox > 0 ? 0 : -desktopSize.cx;
+    } else {
+        wndSize.cx = ox >= 0 ? (desktopSize.cx - ox) : -deskOrigin.x;
+    }
 #ifdef _DEBUG
     //WCHAR tmp[256];
     //swprintf(tmp, 256, L"%d-%d", wndSize.cx, wndSize.cy);
@@ -198,7 +209,9 @@ void updateLabel(int i) {
         PointF origin(rc.X, rc.Y);
         g->MeasureString(keyLabels[i].text, keyLabels[i].length, fontPlus, origin, &rc);
         rc.Width = (rc.Width < labelSettings.cornerSize) ? labelSettings.cornerSize : rc.Width;
-        rc.X = (desktopSize.cx-deskOrigin.x) - rc.Width - labelSettings.borderSize;
+        if(alignment) {
+            rc.X = abs(deskOrigin.x) - rc.Width - labelSettings.borderSize;
+        }
         rc.Height = (rc.Height < labelSettings.cornerSize) ? labelSettings.cornerSize : rc.Height;
         int bgAlpha = (int)(r*labelSettings.bgOpacity), textAlpha = (int)(r*labelSettings.textOpacity), borderAlpha = (int)(r*labelSettings.borderOpacity);
         GraphicsPath path;
@@ -251,8 +264,7 @@ static void startFade() {
         }
     }
     if(dirty) {
-        SIZE wndSize = {desktopSize.cx-deskOrigin.x, desktopSize.cy};
-        updateLayeredWindow(hMainWnd, deskOrigin, wndSize);
+        updateLayeredWindow(hMainWnd);
     }
 }
 
@@ -269,12 +281,18 @@ bool outOfLine(LPCWSTR text) {
     g->MeasureString(keyLabels[labelCount-1].text, keyLabels[labelCount-1].length, fontPlus, origin, &box);
     int cx = (int)box.Width+2*labelSettings.cornerSize+labelSettings.borderSize*2;
     int ox = deskOrigin.x%desktopSize.cx;
-    bool out = (ox < 0) ? (cx >= -ox) : (ox + cx) >= desktopSize.cx;
+    bool out = false;
+    if(alignment) {
+        out = (ox < 0) ? (cx >= desktopSize.cx+ox) : (cx >= ox);
+    } else {
+        out = (ox < 0) ? (cx >= -ox) : (ox + cx) >= desktopSize.cx;
+    }
 #ifdef _DEBUG
     std::stringstream line;
     line << "desktopSize: {" << desktopSize.cx << "," << desktopSize.cy << "};\n";
     line << "deskOrigin: {" << deskOrigin.x << "," << deskOrigin.y << "};\n";
     line << "cx: " << cx << ";\n";
+    line << "alignment: " << alignment << ";\n";
     log("d:\\KeyCastOW.log", line);
 #endif
     return out;
@@ -333,8 +351,7 @@ void showText(LPCWSTR text, int behavior = 0) {
     keyLabels[labelCount-1].fade = TRUE;
     updateLabel(labelCount-1);
     newStrokeCount = labelSettings.keyStrokeDelay;
-    SIZE wndSize = {desktopSize.cx-deskOrigin.x, desktopSize.cy};
-    updateLayeredWindow(hMainWnd, deskOrigin, wndSize);
+    updateLayeredWindow(hMainWnd);
 }
 
 BOOL ColorDialog ( HWND hWnd, COLORREF &clr ) {
@@ -458,7 +475,8 @@ void initSettings() {
     mouseCapturing = TRUE;
     mouseCapturingMod = FALSE;
     keyAutoRepeat = TRUE;
-    mergeMouseActions = FALSE;
+    mergeMouseActions = TRUE;
+    alignment = 1;
     onlyCommandKeys = FALSE;
     tcModifiers = MOD_ALT;
     tcKey = 0x42;
@@ -500,6 +518,7 @@ BOOL saveSettings() {
     RegSetKeyValue(hChildKey, NULL, L"mouseCapturingMod", REG_DWORD, (LPCVOID)&mouseCapturingMod, sizeof(mouseCapturingMod));
     RegSetKeyValue(hChildKey, NULL, L"keyAutoRepeat", REG_DWORD, (LPCVOID)&keyAutoRepeat, sizeof(keyAutoRepeat));
     RegSetKeyValue(hChildKey, NULL, L"mergeMouseActions", REG_DWORD, (LPCVOID)&mergeMouseActions, sizeof(mergeMouseActions));
+    RegSetKeyValue(hChildKey, NULL, L"alignment", REG_DWORD, (LPCVOID)&alignment, sizeof(alignment));
     RegSetKeyValue(hChildKey, NULL, L"onlyCommandKeys", REG_DWORD, (LPCVOID)&onlyCommandKeys, sizeof(onlyCommandKeys));
     RegSetKeyValue(hChildKey, NULL, L"tcModifiers", REG_DWORD, (LPCVOID)&tcModifiers, sizeof(tcModifiers));
     RegSetKeyValue(hChildKey, NULL, L"tcKey", REG_DWORD, (LPCVOID)&tcKey, sizeof(tcKey));
@@ -546,6 +565,7 @@ BOOL loadSettings() {
         RegGetValue(hChildKey, NULL, L"mouseCapturingMod", RRF_RT_DWORD, NULL, &mouseCapturingMod, &size);
         RegGetValue(hChildKey, NULL, L"keyAutoRepeat", RRF_RT_DWORD, NULL, &keyAutoRepeat, &size);
         RegGetValue(hChildKey, NULL, L"mergeMouseActions", RRF_RT_DWORD, NULL, &mergeMouseActions, &size);
+        RegGetValue(hChildKey, NULL, L"alignment", RRF_RT_DWORD, NULL, &alignment, &size);
         RegGetValue(hChildKey, NULL, L"onlyCommandKeys", RRF_RT_DWORD, NULL, &onlyCommandKeys, &size);
         RegGetValue(hChildKey, NULL, L"tcModifiers", RRF_RT_DWORD, NULL, &tcModifiers, &size);
         RegGetValue(hChildKey, NULL, L"tcKey", RRF_RT_DWORD, NULL, &tcKey, &size);
@@ -607,6 +627,7 @@ void renderSettingsData(HWND hwndDlg) {
     CheckDlgButton(hwndDlg, IDC_MODWIN, (tcModifiers & MOD_WIN) ? BST_CHECKED : BST_UNCHECKED);
     swprintf(tmp, 256, L"%c", MapVirtualKey(tcKey, MAPVK_VK_TO_CHAR));
     SetDlgItemText(hwndDlg, IDC_TCKEY, tmp);
+    ComboBox_SetCurSel(GetDlgItem(hwndDlg, IDC_ALIGNMENT), alignment);
 }
 void getLabelSettings(HWND hwndDlg, LabelSettings &lblSettings) {
     WCHAR tmp[256];
@@ -719,6 +740,9 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                 CreateToolTip(hwndDlg, IDC_OFFSETX, L"You can drag this dialog to set position.");
                 CreateToolTip(hwndDlg, IDC_OFFSETY, L"You can drag this dialog to set position.");
                 CreateToolTip(hwndDlg, IDC_COMBSCHEME, L"[+] to display combination keys like [Alt + Tab].");
+                HWND hCtrl = GetDlgItem(hwndDlg, IDC_ALIGNMENT);
+                ComboBox_InsertString(hCtrl, 0, L"Left");
+                ComboBox_InsertString(hCtrl, 1, L"Right");
             }
             return TRUE;
         case WM_NOTIFY:
@@ -829,6 +853,7 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                         tcModifiers |= MOD_WIN;
                     }
                     GetDlgItemText(hwndDlg, IDC_TCKEY, tmp, 256);
+                    alignment = ComboBox_GetCurSel(GetDlgItem(hwndDlg, IDC_ALIGNMENT));
                     if(tcModifiers != 0 && tmp[0] != '\0') {
                         tcKey = VkKeyScanEx(tmp[0], GetKeyboardLayout(0));
                         UnregisterHotKey(NULL, 1);
