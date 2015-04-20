@@ -80,8 +80,10 @@ BOOL keyAutoRepeat = TRUE;
 BOOL mergeMouseActions = TRUE;
 int alignment = 1;
 BOOL onlyCommandKeys = FALSE;
+BOOL positioning = FALSE;
 UINT tcModifiers = MOD_ALT;
 UINT tcKey = 0x42;      // 0x42 is 'b'
+Color clearColor(0, 127, 127, 127);
 #define BRANDINGMAX 256
 WCHAR branding[BRANDINGMAX];
 WCHAR comboChars[4];
@@ -129,7 +131,7 @@ void stamp(HWND hwnd, LPCWSTR text) {
     Graphics g(memDC);
     g.SetSmoothingMode(SmoothingModeAntiAlias);
     g.SetTextRenderingHint(TextRenderingHintAntiAlias);
-    g.Clear(Color::Color(0, 0x7f,0,0x8f));
+    g.Clear(clearColor);
 
     RectF rc((REAL)labelSettings.borderSize, (REAL)labelSettings.borderSize, 0.0, 0.0);
     SizeF stringSize, layoutSize((REAL)desktopSize.cx-2*labelSettings.borderSize, (REAL)desktopSize.cy-2*labelSettings.borderSize);
@@ -172,11 +174,6 @@ void updateLayeredWindow(HWND hwnd) {
     } else {
         wndSize.cx = ox >= 0 ? (desktopSize.cx - ox) : -deskOrigin.x;
     }
-#ifdef _DEBUG
-    //WCHAR tmp[256];
-    //swprintf(tmp, 256, L"%d-%d", wndSize.cx, wndSize.cy);
-    //stamp(hWndStamp, tmp);
-#endif
 
     POINT ptSrc = {0, 0};
     POINT ptDst1 = {ptDst.x, -ptDst.y};
@@ -195,7 +192,7 @@ void eraseLabel(int i) {
     RectF &rt = keyLabels[i].rect;
     RectF rc(rt.X-labelSettings.borderSize, rt.Y-labelSettings.borderSize, rt.Width+2*labelSettings.borderSize+1, rt.Height+2*labelSettings.borderSize+1);
     g->SetClip(rc);
-    g->Clear(Color::Color(0, 0x7f,0,0x8f));
+    g->Clear(clearColor);
     g->ResetClip();
 }
 #define BR(alpha, bgr) (alpha<<24|bgr>>16|(bgr&0x0000ff00)|(bgr&0x000000ff)<<16)
@@ -293,12 +290,17 @@ bool outOfLine(LPCWSTR text) {
     line << "deskOrigin: {" << deskOrigin.x << "," << deskOrigin.y << "};\n";
     line << "cx: " << cx << ";\n";
     line << "alignment: " << alignment << ";\n";
+    RECT rc;
+    GetWindowRect(hMainWnd, &rc);
+    HMONITOR hMonitor = MonitorFromRect(&rc, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi;
+    mi.cbSize = sizeof(mi);
+    GetMonitorInfo(hMonitor, &mi);
+    line << "rcMonitor: {" << mi.rcMonitor.left << "," <<  mi.rcMonitor.right << "," <<  mi.rcMonitor.bottom << "," <<  mi.rcMonitor.top << "," <<  "};\n";
+    line << "rcWork: {" << mi.rcWork.left << "," <<  mi.rcWork.right << "," <<  mi.rcWork.bottom << "," <<  mi.rcWork.top << "," <<  "};\n";
     log("d:\\KeyCastOW.log", line);
 #endif
     return out;
-}
-void fadeLastLabel(BOOL weither) {
-    keyLabels[labelCount-1].fade = weither;
 }
 /*
  * behavior 0: append text to last label
@@ -353,7 +355,22 @@ void showText(LPCWSTR text, int behavior = 0) {
     newStrokeCount = labelSettings.keyStrokeDelay;
     updateLayeredWindow(hMainWnd);
 }
-
+void fadeLastLabel(BOOL weither) {
+    keyLabels[labelCount-1].fade = weither;
+}
+void positionOrigin(int action, POINT &pt) {
+    if (positioning && action == 0) {
+        WCHAR tmp[256];
+        deskOrigin.x = pt.x;
+        deskOrigin.y = desktopSize.cy - pt.y;
+        swprintf(tmp, 256, L"%d, %d", deskOrigin.x, deskOrigin.y);
+        showText(tmp, 2);
+    } else {
+        positioning = FALSE;
+        clearColor.SetValue(0x007f7f7f);
+        g->Clear(clearColor);
+    }
+}
 BOOL ColorDialog ( HWND hWnd, COLORREF &clr ) {
     DWORD dwCustClrs[16] = {
         RGB(0,0,0),
@@ -415,7 +432,7 @@ void updateMainWindow() {
         labelCount = 1;
     }
 
-    g->Clear(Color::Color(0, 0x7f,0,0x8f));
+    g->Clear(clearColor);
     for(DWORD i = 0; i < labelCount; i ++) {
         keyLabels[i].rect.X = (REAL)labelSettings.borderSize;
         keyLabels[i].rect.Y = unitH*(i+offset) + labelSpacing - labelSettings.borderSize;
@@ -463,10 +480,8 @@ void initSettings() {
     maximumLines = 10;
     wcscpy_s(branding, BRANDINGMAX, TEXT("Hi there, press any key to try, double click to configure."));
     wcscpy_s(comboChars, sizeof(comboChars), TEXT("<->"));
-    // deskOrigin.x = 0x7fffffff;
-    // deskOrigin.y = 0x7fffffff;
-    deskOrigin.x = settingsDlgRect.left;
-    deskOrigin.y = desktopSize.cy - settingsDlgRect.bottom;
+    deskOrigin.x = desktopSize.cx - labelSettings.borderSize;
+    deskOrigin.y = 0;
     SetWindowPos(hDlgSettings, 0,
             desktopSize.cx - settingsDlgRect.right + settingsDlgRect.left,
             desktopSize.cy - settingsDlgRect.bottom + settingsDlgRect.top, 0, 0, SWP_NOSIZE);
@@ -608,10 +623,6 @@ void renderSettingsData(HWND hwndDlg) {
     SetDlgItemText(hwndDlg, IDC_LABELSPACING, tmp);
     swprintf(tmp, 256, L"%d", maximumLines);
     SetDlgItemText(hwndDlg, IDC_MAXIMUMLINES, tmp);
-    swprintf(tmp, 256, L"%d", deskOrigin.x);
-    SetDlgItemText(hwndDlg, IDC_OFFSETX, tmp);
-    swprintf(tmp, 256, L"%d", deskOrigin.y);
-    SetDlgItemText(hwndDlg, IDC_OFFSETY, tmp);
     SetDlgItemText(hwndDlg, IDC_BRANDING, branding);
     SetDlgItemText(hwndDlg, IDC_COMBSCHEME, comboChars);
     CheckDlgButton(hwndDlg, IDC_VISIBLESHIFT, visibleShift ? BST_CHECKED : BST_UNCHECKED);
@@ -687,7 +698,6 @@ static void previewLabel() {
     Graphics g(memDC);
     g.SetSmoothingMode(SmoothingModeAntiAlias);
     g.SetTextRenderingHint(TextRenderingHintAntiAlias);
-    //g.Clear(Color::Color(200, 0x7f,0,0x8f));
 
     WCHAR text[] = L"BH";
     HFONT hFont = CreateFontIndirect(&previewLabelSettings.labelFont);
@@ -737,8 +747,6 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                         desktopSize.cx - settingsDlgRect.right + settingsDlgRect.left,
                         desktopSize.cy - settingsDlgRect.bottom + settingsDlgRect.top, 0, 0, SWP_NOSIZE);
                 GetWindowRect(hwndDlg, &settingsDlgRect);
-                CreateToolTip(hwndDlg, IDC_OFFSETX, L"You can drag this dialog to set position.");
-                CreateToolTip(hwndDlg, IDC_OFFSETY, L"You can drag this dialog to set position.");
                 CreateToolTip(hwndDlg, IDC_COMBSCHEME, L"[+] to display combination keys like [Alt + Tab].");
                 HWND hCtrl = GetDlgItem(hwndDlg, IDC_ALIGNMENT);
                 ComboBox_InsertString(hCtrl, 0, L"Left");
@@ -759,14 +767,6 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     }
             }
 
-            break;
-        case WM_MOVE:
-            deskOrigin.x = (int)(short) LOWORD(lParam);
-            deskOrigin.y = desktopSize.cy - (int)(short) HIWORD(lParam) - (settingsDlgRect.bottom - settingsDlgRect.top);
-            swprintf(tmp, 256, L"%d", deskOrigin.x);
-            SetDlgItemText(hwndDlg, IDC_OFFSETX, tmp);
-            swprintf(tmp, 256, L"%d", deskOrigin.y);
-            SetDlgItemText(hwndDlg, IDC_OFFSETY, tmp);
             break;
         case WM_COMMAND:
             switch (LOWORD(wParam))
@@ -814,6 +814,17 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                         saveSettings();
                     }
                     return TRUE;
+                case IDC_POSITION:
+                    {
+                        alignment = ComboBox_GetCurSel(GetDlgItem(hwndDlg, IDC_ALIGNMENT));
+                        updateMainWindow();
+                        clearColor.SetValue(0x7f7f7f7f);
+                        g->Clear(clearColor);
+                        showText(L"\u254b", 1);
+                        fadeLastLabel(FALSE);
+                        positioning = TRUE;
+                    }
+                    return TRUE;
                 case IDOK:
                     labelSettings = previewLabelSettings;
                     GetDlgItemText(hwndDlg, IDC_LABELSPACING, tmp, 256);
@@ -826,10 +837,6 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     if(maximumLines > MAXLABELS) {
                         maximumLines = MAXLABELS;
                     }
-                    GetDlgItemText(hwndDlg, IDC_OFFSETX, tmp, 256);
-                    deskOrigin.x = _wtoi(tmp);
-                    GetDlgItemText(hwndDlg, IDC_OFFSETY, tmp, 256);
-                    deskOrigin.y = _wtoi(tmp);
                     GetDlgItemText(hwndDlg, IDC_BRANDING, branding, BRANDINGMAX);
                     GetDlgItemText(hwndDlg, IDC_COMBSCHEME, comboChars, 4);
                     visibleShift = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_VISIBLESHIFT));

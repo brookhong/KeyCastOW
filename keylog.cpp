@@ -172,9 +172,11 @@ extern BOOL keyAutoRepeat;
 extern BOOL mergeMouseActions;
 extern BOOL onlyCommandKeys;
 extern WCHAR comboChars[3];
+extern BOOL positioning;
 HHOOK kbdhook, moshook;
 void showText(LPCWSTR text, int behavior = 0);
 void fadeLastLabel(BOOL weither);
+void positionOrigin(int action, POINT &pt);
 
 LPCWSTR GetSymbolFromVK(UINT vk, UINT sc, BOOL mod) {
     static WCHAR symbol[32];
@@ -286,8 +288,6 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
         if(!keyAutoRepeat && lastvk == k.vkCode) {
             fadeLastLabel(FALSE);
             return TRUE;
-        } else {
-            lastvk = k.vkCode;
         }
         int fin = 0;
         if(k.vkCode >= spk && k.vkCode <= 0xA5 ||          // ctrl / alt
@@ -301,7 +301,11 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
             }
             if(visibleModifier) {
                 swprintf(c, 64, L"%c%s%c", comboChars[0], modifierkey, comboChars[2]);
-                showText(c, 1);
+                if(lastvk == k.vkCode) {
+                    showText(c, 2);
+                } else {
+                    showText(c, 1);
+                }
             }
         } else {
             WORD a = 0;
@@ -328,6 +332,7 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
                 }
             }
         }
+        lastvk = k.vkCode;
     }
 
     return CallNextHookEx(kbdhook, nCode, wp, lp);
@@ -342,7 +347,10 @@ LRESULT CALLBACK LLMouseProc(int nCode, WPARAM wp, LPARAM lp)
     int behavior = 1;
     static DWORD mouseButtonDown = 0;
     static DWORD lastClick = 0;
-    if ((mouseCapturing || mouseCapturingMod) && idx > 0 && idx < nMouseActions && nCode == HC_ACTION) {
+    if(positioning) {
+        MSLLHOOKSTRUCT* ms = reinterpret_cast<MSLLHOOKSTRUCT*>(lp);
+        positionOrigin(idx, ms->pt);
+    } else if ((mouseCapturing || mouseCapturingMod) && idx > 0 && idx < nMouseActions && nCode == HC_ACTION) {
         MSLLHOOKSTRUCT* ms = reinterpret_cast<MSLLHOOKSTRUCT*>(lp);
 
         if (!(ms->flags & LLMHF_INJECTED)) {
