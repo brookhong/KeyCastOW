@@ -93,7 +93,9 @@ POINT deskOrigin;
 KeyLabel keyLabels[MAXLABELS];
 DWORD maximumLines = 10;
 DWORD labelCount = 0;
-SIZE desktopSize;
+RECT desktopRect;
+SIZE canvasSize;
+POINT ptDst;
 
 #include "keycast.h"
 #include "keylog.h"
@@ -126,7 +128,7 @@ void stamp(HWND hwnd, LPCWSTR text) {
     GetWindowRect(hwnd,&rt);
     HDC hdc = GetDC(hwnd);
     HDC memDC = ::CreateCompatibleDC(hdc);
-    HBITMAP memBitmap = ::CreateCompatibleBitmap(hdc, desktopSize.cx, desktopSize.cy);
+    HBITMAP memBitmap = ::CreateCompatibleBitmap(hdc, desktopRect.right - desktopRect.left, desktopRect.bottom - desktopRect.top);
     ::SelectObject(memDC,memBitmap);
     Graphics g(memDC);
     g.SetSmoothingMode(SmoothingModeAntiAlias);
@@ -134,7 +136,7 @@ void stamp(HWND hwnd, LPCWSTR text) {
     g.Clear(clearColor);
 
     RectF rc((REAL)labelSettings.borderSize, (REAL)labelSettings.borderSize, 0.0, 0.0);
-    SizeF stringSize, layoutSize((REAL)desktopSize.cx-2*labelSettings.borderSize, (REAL)desktopSize.cy-2*labelSettings.borderSize);
+    SizeF stringSize, layoutSize((REAL)desktopRect.right - desktopRect.left-2*labelSettings.borderSize, (REAL)desktopRect.bottom - desktopRect.top-2*labelSettings.borderSize);
     StringFormat format;
     format.SetAlignment(StringAlignmentCenter);
     g.MeasureString(text, wcslen(text), fontPlus, layoutSize, &format, &stringSize);
@@ -165,18 +167,8 @@ void stamp(HWND hwnd, LPCWSTR text) {
     ReleaseDC(hwnd, hdc);
 }
 void updateLayeredWindow(HWND hwnd) {
-    SIZE wndSize = {0, desktopSize.cy};
-    int ox = deskOrigin.x%desktopSize.cx;
-    POINT ptDst = {ox, deskOrigin.y};
-    if(alignment) {
-        wndSize.cx = ox > 0 ? ox : (ox + desktopSize.cx);
-        ptDst.x = ox > 0 ? 0 : -desktopSize.cx;
-    } else {
-        wndSize.cx = ox >= 0 ? (desktopSize.cx - ox) : -deskOrigin.x;
-    }
 
     POINT ptSrc = {0, 0};
-    POINT ptDst1 = {ptDst.x, -ptDst.y};
     BLENDFUNCTION blendFunction;
     blendFunction.AlphaFormat = AC_SRC_ALPHA;
     blendFunction.BlendFlags = 0;
@@ -184,7 +176,7 @@ void updateLayeredWindow(HWND hwnd) {
     blendFunction.SourceConstantAlpha = 255;
     HDC hdcBuf = g->GetHDC();
     HDC hdc = GetDC(hwnd);
-    ::UpdateLayeredWindow(hwnd,hdc,&ptDst1,&wndSize,hdcBuf,&ptSrc,0,&blendFunction,2);
+    ::UpdateLayeredWindow(hwnd,hdc,&ptDst,&canvasSize,hdcBuf,&ptSrc,0,&blendFunction,2);
     ReleaseDC(hwnd, hdc);
     g->ReleaseHDC(hdcBuf);
 }
@@ -207,7 +199,9 @@ void updateLabel(int i) {
         g->MeasureString(keyLabels[i].text, keyLabels[i].length, fontPlus, origin, &rc);
         rc.Width = (rc.Width < labelSettings.cornerSize) ? labelSettings.cornerSize : rc.Width;
         if(alignment) {
-            rc.X = abs(deskOrigin.x) - rc.Width - labelSettings.borderSize;
+            rc.X = canvasSize.cx - rc.Width - labelSettings.borderSize;
+        } else {
+            rc.X = (REAL)labelSettings.borderSize;
         }
         rc.Height = (rc.Height < labelSettings.cornerSize) ? labelSettings.cornerSize : rc.Height;
         int bgAlpha = (int)(r*labelSettings.bgOpacity), textAlpha = (int)(r*labelSettings.textOpacity), borderAlpha = (int)(r*labelSettings.borderOpacity);
@@ -277,16 +271,9 @@ bool outOfLine(LPCWSTR text) {
     PointF origin(0, 0);
     g->MeasureString(keyLabels[labelCount-1].text, keyLabels[labelCount-1].length, fontPlus, origin, &box);
     int cx = (int)box.Width+2*labelSettings.cornerSize+labelSettings.borderSize*2;
-    int ox = deskOrigin.x%desktopSize.cx;
-    bool out = false;
-    if(alignment) {
-        out = (ox < 0) ? (cx >= desktopSize.cx+ox) : (cx >= ox);
-    } else {
-        out = (ox < 0) ? (cx >= -ox) : (ox + cx) >= desktopSize.cx;
-    }
+    bool out = cx >= canvasSize.cx;
 #ifdef _DEBUG
     std::stringstream line;
-    line << "desktopSize: {" << desktopSize.cx << "," << desktopSize.cy << "};\n";
     line << "deskOrigin: {" << deskOrigin.x << "," << deskOrigin.y << "};\n";
     line << "cx: " << cx << ";\n";
     line << "alignment: " << alignment << ";\n";
@@ -358,15 +345,35 @@ void showText(LPCWSTR text, int behavior = 0) {
 void fadeLastLabel(BOOL weither) {
     keyLabels[labelCount-1].fade = weither;
 }
+
+void updateCanvasSize(const POINT &pt) {
+    for(DWORD i = 0; i < labelCount; i ++) {
+        if(keyLabels[i].time > 0) {
+            eraseLabel(i);
+            keyLabels[i].time = 0;
+        }
+    }
+    canvasSize.cy = desktopRect.bottom - desktopRect.top;
+    ptDst.y = pt.y - desktopRect.bottom - desktopRect.top;
+    if(alignment) {
+        canvasSize.cx = pt.x - desktopRect.left;
+        ptDst.x = desktopRect.left;
+    } else {
+        canvasSize.cx = desktopRect.right - pt.x;
+        ptDst.x = pt.x;
+    }
+}
 void positionOrigin(int action, POINT &pt) {
     if (positioning && action == 0) {
         WCHAR tmp[256];
-        deskOrigin.x = pt.x;
-        deskOrigin.y = desktopSize.cy - pt.y;
-        swprintf(tmp, 256, L"%d, %d", deskOrigin.x, deskOrigin.y);
+        swprintf(tmp, 256, L"%d, %d", pt.x, pt.y);
+        updateCanvasSize(pt);
         showText(tmp, 2);
     } else {
         positioning = FALSE;
+        deskOrigin.x = pt.x;
+        deskOrigin.y = pt.y;
+        updateCanvasSize(pt);
         clearColor.SetValue(0x007f7f7f);
         g->Clear(clearColor);
     }
@@ -421,7 +428,7 @@ void updateMainWindow() {
     PointF origin(0, 0);
     g->MeasureString(L"\u263b - KeyCastOW OFF", 16, fontPlus, origin, &box);
     REAL unitH = box.Height+2*labelSettings.borderSize+labelSpacing;
-    labelCount = desktopSize.cy / (int)unitH;
+    labelCount = canvasSize.cy / (int)unitH;
 
     DWORD offset = 0;
     if(labelCount > maximumLines) {
@@ -435,7 +442,7 @@ void updateMainWindow() {
     g->Clear(clearColor);
     for(DWORD i = 0; i < labelCount; i ++) {
         keyLabels[i].rect.X = (REAL)labelSettings.borderSize;
-        keyLabels[i].rect.Y = unitH*(i+offset) + labelSpacing - labelSettings.borderSize;
+        keyLabels[i].rect.Y = unitH*(i+offset) + box.Height - labelSettings.borderSize;
         if(keyLabels[i].time > labelSettings.lingerTime+labelSettings.fadeDuration) {
             keyLabels[i].time = labelSettings.lingerTime+labelSettings.fadeDuration;
         }
@@ -480,11 +487,11 @@ void initSettings() {
     maximumLines = 10;
     wcscpy_s(branding, BRANDINGMAX, TEXT("Hi there, press any key to try, double click to configure."));
     wcscpy_s(comboChars, sizeof(comboChars), TEXT("<->"));
-    deskOrigin.x = desktopSize.cx - labelSettings.borderSize;
-    deskOrigin.y = 0;
+    deskOrigin.x = desktopRect.right - desktopRect.left - labelSettings.borderSize;
+    deskOrigin.y = desktopRect.bottom - desktopRect.top;
     SetWindowPos(hDlgSettings, 0,
-            desktopSize.cx - settingsDlgRect.right + settingsDlgRect.left,
-            desktopSize.cy - settingsDlgRect.bottom + settingsDlgRect.top, 0, 0, SWP_NOSIZE);
+            desktopRect.right - desktopRect.left - settingsDlgRect.right + settingsDlgRect.left,
+            desktopRect.bottom - desktopRect.top - settingsDlgRect.bottom + settingsDlgRect.top, 0, 0, SWP_NOSIZE);
     visibleShift = FALSE;
     visibleModifier = TRUE;
     mouseCapturing = TRUE;
@@ -744,8 +751,8 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                 renderSettingsData(hwndDlg);
                 GetWindowRect(hwndDlg, &settingsDlgRect);
                 SetWindowPos(hwndDlg, 0,
-                        desktopSize.cx - settingsDlgRect.right + settingsDlgRect.left,
-                        desktopSize.cy - settingsDlgRect.bottom + settingsDlgRect.top, 0, 0, SWP_NOSIZE);
+                        desktopRect.right - desktopRect.left - settingsDlgRect.right + settingsDlgRect.left,
+                        desktopRect.bottom - desktopRect.top - settingsDlgRect.bottom + settingsDlgRect.top, 0, 0, SWP_NOSIZE);
                 GetWindowRect(hwndDlg, &settingsDlgRect);
                 CreateToolTip(hwndDlg, IDC_COMBSCHEME, L"[+] to display combination keys like [Alt + Tab].");
                 HWND hCtrl = GetDlgItem(hwndDlg, IDC_ALIGNMENT);
@@ -817,7 +824,6 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                 case IDC_POSITION:
                     {
                         alignment = ComboBox_GetCurSel(GetDlgItem(hwndDlg, IDC_ALIGNMENT));
-                        updateMainWindow();
                         clearColor.SetValue(0x7f7f7f7f);
                         g->Clear(clearColor);
                         showText(L"\u254b", 1);
@@ -829,8 +835,8 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     labelSettings = previewLabelSettings;
                     GetDlgItemText(hwndDlg, IDC_LABELSPACING, tmp, 256);
                     labelSpacing = _wtoi(tmp);
-                    if(labelSpacing > (DWORD)desktopSize.cy/3) {
-                        labelSpacing = (DWORD)desktopSize.cy/3;
+                    if(labelSpacing > (DWORD)(desktopRect.bottom - desktopRect.top)/3) {
+                        labelSpacing = (DWORD)(desktopRect.bottom - desktopRect.top)/3;
                     }
                     GetDlgItemText(hwndDlg, IDC_MAXIMUMLINES, tmp, 256);
                     maximumLines = _wtoi(tmp);
@@ -916,11 +922,11 @@ LRESULT CALLBACK DraggableWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
     }
     return 0;
 }
+
 void getDesktopRect() {
-    RECT desktopRect;
     SystemParametersInfo(SPI_GETWORKAREA,NULL,&desktopRect,NULL);
-    desktopSize.cx = desktopRect.right - desktopRect.left;
-    desktopSize.cy = desktopRect.bottom - desktopRect.top;
+
+    updateCanvasSize(deskOrigin);
 }
 LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     static POINT s_last_mouse;
@@ -1044,7 +1050,6 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         return 0;
     }
 
-    getDesktopRect();
     hMainWnd = CreateWindowEx(
             WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
             szWinName,
@@ -1062,8 +1067,9 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         return 0;
     }
 
-    hDlgSettings = CreateDialog(hThisInst, MAKEINTRESOURCE(IDD_DLGSETTINGS), NULL, (DLGPROC)SettingsWndProc);
     loadSettings();
+    getDesktopRect();
+    hDlgSettings = CreateDialog(hThisInst, MAKEINTRESOURCE(IDD_DLGSETTINGS), NULL, (DLGPROC)SettingsWndProc);
     MyRegisterClassEx(hThisInst, L"STAMP", DraggableWndProc);
     hWndStamp = CreateWindowEx(
             WS_EX_LAYERED | WS_EX_NOACTIVATE,
@@ -1078,7 +1084,7 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
 
     HDC hdc = GetDC(hMainWnd);
     HDC hdcBuffer = CreateCompatibleDC(hdc);
-    HBITMAP hbitmap = CreateCompatibleBitmap(hdc, desktopSize.cx, desktopSize.cy);
+    HBITMAP hbitmap = CreateCompatibleBitmap(hdc, desktopRect.right - desktopRect.left, desktopRect.bottom - desktopRect.top);
     HBITMAP hBitmapOld = (HBITMAP)SelectObject(hdcBuffer, (HGDIOBJ)hbitmap);
     ReleaseDC(hMainWnd, hdc);
     DeleteObject(hBitmapOld);
