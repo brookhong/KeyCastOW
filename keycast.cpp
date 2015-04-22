@@ -95,7 +95,7 @@ DWORD maximumLines = 10;
 DWORD labelCount = 0;
 RECT desktopRect;
 SIZE canvasSize;
-POINT ptDst;
+POINT canvasOrigin;
 
 #include "keycast.h"
 #include "keylog.h"
@@ -106,7 +106,7 @@ HWND hDlgSettings;
 RECT settingsDlgRect;
 HWND hWndStamp;
 HINSTANCE hInstance;
-Graphics * g;
+Graphics * gCanvas = NULL;
 Font * fontPlus = NULL;
 
 #define IDI_TRAY       100
@@ -167,25 +167,24 @@ void stamp(HWND hwnd, LPCWSTR text) {
     ReleaseDC(hwnd, hdc);
 }
 void updateLayeredWindow(HWND hwnd) {
-
     POINT ptSrc = {0, 0};
     BLENDFUNCTION blendFunction;
     blendFunction.AlphaFormat = AC_SRC_ALPHA;
     blendFunction.BlendFlags = 0;
     blendFunction.BlendOp = AC_SRC_OVER;
     blendFunction.SourceConstantAlpha = 255;
-    HDC hdcBuf = g->GetHDC();
+    HDC hdcBuf = gCanvas->GetHDC();
     HDC hdc = GetDC(hwnd);
-    ::UpdateLayeredWindow(hwnd,hdc,&ptDst,&canvasSize,hdcBuf,&ptSrc,0,&blendFunction,2);
+    ::UpdateLayeredWindow(hwnd,hdc,&canvasOrigin,&canvasSize,hdcBuf,&ptSrc,0,&blendFunction,2);
     ReleaseDC(hwnd, hdc);
-    g->ReleaseHDC(hdcBuf);
+    gCanvas->ReleaseHDC(hdcBuf);
 }
 void eraseLabel(int i) {
     RectF &rt = keyLabels[i].rect;
     RectF rc(rt.X-labelSettings.borderSize, rt.Y-labelSettings.borderSize, rt.Width+2*labelSettings.borderSize+1, rt.Height+2*labelSettings.borderSize+1);
-    g->SetClip(rc);
-    g->Clear(clearColor);
-    g->ResetClip();
+    gCanvas->SetClip(rc);
+    gCanvas->Clear(clearColor);
+    gCanvas->ResetClip();
 }
 #define BR(alpha, bgr) (alpha<<24|bgr>>16|(bgr&0x0000ff00)|(bgr&0x000000ff)<<16)
 void updateLabel(int i) {
@@ -196,7 +195,7 @@ void updateLabel(int i) {
         REAL r = 1.0f*keyLabels[i].time/labelSettings.fadeDuration;
         r = (r > 1.0f) ? 1.0f : r;
         PointF origin(rc.X, rc.Y);
-        g->MeasureString(keyLabels[i].text, keyLabels[i].length, fontPlus, origin, &rc);
+        gCanvas->MeasureString(keyLabels[i].text, keyLabels[i].length, fontPlus, origin, &rc);
         rc.Width = (rc.Width < labelSettings.cornerSize) ? labelSettings.cornerSize : rc.Width;
         if(alignment) {
             rc.X = canvasSize.cx - rc.Width - labelSettings.borderSize;
@@ -214,11 +213,11 @@ void updateLabel(int i) {
         path.AddLine(rc.X, rc.Y + dy, rc.X, rc.Y + labelSettings.cornerSize/2);
         Pen penPlus(Color::Color(BR(borderAlpha, labelSettings.borderColor)), labelSettings.borderSize+0.0f);
         SolidBrush brushPlus(Color::Color(BR(bgAlpha, labelSettings.bgColor)));
-        g->DrawPath(&penPlus, &path);
-        g->FillPath(&brushPlus, &path);
+        gCanvas->DrawPath(&penPlus, &path);
+        gCanvas->FillPath(&brushPlus, &path);
 
         SolidBrush textBrushPlus(Color(BR(textAlpha, labelSettings.textColor)));
-        g->DrawString( keyLabels[i].text,
+        gCanvas->DrawString( keyLabels[i].text,
                 keyLabels[i].length,
                 fontPlus,
                 PointF(rc.X, rc.Y),
@@ -269,7 +268,7 @@ bool outOfLine(LPCWSTR text) {
     wcscpy_s(tmp, (textBufferEnd-tmp), text);
     RectF box;
     PointF origin(0, 0);
-    g->MeasureString(keyLabels[labelCount-1].text, keyLabels[labelCount-1].length, fontPlus, origin, &box);
+    gCanvas->MeasureString(keyLabels[labelCount-1].text, keyLabels[labelCount-1].length, fontPlus, origin, &box);
     int cx = (int)box.Width+2*labelSettings.cornerSize+labelSettings.borderSize*2;
     bool out = cx >= canvasSize.cx;
 #ifdef _DEBUG
@@ -277,14 +276,6 @@ bool outOfLine(LPCWSTR text) {
     line << "deskOrigin: {" << deskOrigin.x << "," << deskOrigin.y << "};\n";
     line << "cx: " << cx << ";\n";
     line << "alignment: " << alignment << ";\n";
-    RECT rc;
-    GetWindowRect(hMainWnd, &rc);
-    HMONITOR hMonitor = MonitorFromRect(&rc, MONITOR_DEFAULTTONEAREST);
-    MONITORINFO mi;
-    mi.cbSize = sizeof(mi);
-    GetMonitorInfo(hMonitor, &mi);
-    line << "rcMonitor: {" << mi.rcMonitor.left << "," <<  mi.rcMonitor.right << "," <<  mi.rcMonitor.bottom << "," <<  mi.rcMonitor.top << "," <<  "};\n";
-    line << "rcWork: {" << mi.rcWork.left << "," <<  mi.rcWork.right << "," <<  mi.rcWork.bottom << "," <<  mi.rcWork.top << "," <<  "};\n";
     log("d:\\KeyCastOW.log", line);
 #endif
     return out;
@@ -354,20 +345,96 @@ void updateCanvasSize(const POINT &pt) {
         }
     }
     canvasSize.cy = desktopRect.bottom - desktopRect.top;
-    ptDst.y = pt.y - desktopRect.bottom - desktopRect.top;
+    canvasOrigin.y = pt.y - desktopRect.bottom - desktopRect.top;
     if(alignment) {
         canvasSize.cx = pt.x - desktopRect.left;
-        ptDst.x = desktopRect.left;
+        canvasOrigin.x = desktopRect.left;
     } else {
         canvasSize.cx = desktopRect.right - pt.x;
-        ptDst.x = pt.x;
+        canvasOrigin.x = pt.x;
     }
+}
+void createCanvas() {
+    HDC hdc = GetDC(hMainWnd);
+    HDC hdcBuffer = CreateCompatibleDC(hdc);
+    HBITMAP hbitmap = CreateCompatibleBitmap(hdc, desktopRect.right - desktopRect.left, desktopRect.bottom - desktopRect.top);
+    HBITMAP hBitmapOld = (HBITMAP)SelectObject(hdcBuffer, (HGDIOBJ)hbitmap);
+    ReleaseDC(hMainWnd, hdc);
+    DeleteObject(hBitmapOld);
+    if(gCanvas) {
+        delete gCanvas;
+    }
+    gCanvas = new Graphics(hdcBuffer);
+    gCanvas->SetSmoothingMode(SmoothingModeAntiAlias);
+    gCanvas->SetTextRenderingHint(TextRenderingHintAntiAlias);
+}
+void prepareLabels() {
+    HDC hdc = GetDC(hMainWnd);
+    HFONT hlabelFont = CreateFontIndirect(&labelSettings.labelFont);
+    HFONT hFontOld = (HFONT)SelectObject(hdc, hlabelFont);
+    DeleteObject(hFontOld);
+
+    if(fontPlus) {
+        delete fontPlus;
+    }
+    fontPlus = new Font(hdc, hlabelFont);
+    ReleaseDC(hMainWnd, hdc);
+    RectF box;
+    PointF origin(0, 0);
+    gCanvas->MeasureString(L"\u263b - KeyCastOW OFF", 16, fontPlus, origin, &box);
+    REAL unitH = box.Height+2*labelSettings.borderSize+labelSpacing;
+    labelCount = (desktopRect.bottom - desktopRect.top) / (int)unitH;
+    REAL paddingH = (desktopRect.bottom - desktopRect.top) - unitH*labelCount;
+
+    DWORD offset = 0;
+    if(labelCount > maximumLines) {
+        offset = labelCount-maximumLines;
+        labelCount = maximumLines;
+    } else if(labelCount == 0) {
+        offset = labelCount-1;
+        labelCount = 1;
+    }
+
+    gCanvas->Clear(clearColor);
+    for(DWORD i = 0; i < labelCount; i ++) {
+        keyLabels[i].rect.X = (REAL)labelSettings.borderSize;
+        keyLabels[i].rect.Y = paddingH + unitH*(i+offset) + labelSpacing + labelSettings.borderSize;
+        if(keyLabels[i].time > labelSettings.lingerTime+labelSettings.fadeDuration) {
+            keyLabels[i].time = labelSettings.lingerTime+labelSettings.fadeDuration;
+        }
+        if(keyLabels[i].time > 0) {
+            updateLabel(i);
+        }
+    }
+
+    stamp(hWndStamp, branding);
 }
 void positionOrigin(int action, POINT &pt) {
     if (positioning && action == 0) {
+        updateCanvasSize(pt);
+
+        RECT rc = {pt.x-1, pt.y-1, pt.x+1, pt.y+1};
+        HMONITOR hMonitor = MonitorFromRect(&rc, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO mi;
+        mi.cbSize = sizeof(mi);
+        GetMonitorInfo(hMonitor, &mi);
+        if(mi.rcWork.left != desktopRect.left || mi.rcWork.top != desktopRect.top) {
+            CopyMemory(&desktopRect, &mi.rcWork, sizeof(RECT));
+            MoveWindow(hMainWnd, desktopRect.left, desktopRect.top, 1, 1, TRUE);
+            createCanvas();
+            prepareLabels();
+        }
+#ifdef _DEBUG
+        std::stringstream line;
+        line << "rcWork: {" << mi.rcWork.left << "," <<  mi.rcWork.top << "," <<  mi.rcWork.right << "," <<  mi.rcWork.bottom << "};\n";
+        line << "desktopRect: {" << desktopRect.left << "," <<  desktopRect.top << "," <<  desktopRect.right << "," <<  desktopRect.bottom << "};\n";
+        line << "canvasSize: {" << canvasSize.cx << "," <<  canvasSize.cy << "};\n";
+        line << "canvasOrigin: {" << canvasOrigin.x << "," <<  canvasOrigin.y << "};\n";
+        line << "labelCount: " << labelCount << "\n";
+        log("d:\\KeyCastOW.log", line);
+#endif
         WCHAR tmp[256];
         swprintf(tmp, 256, L"%d, %d", pt.x, pt.y);
-        updateCanvasSize(pt);
         showText(tmp, 2);
     } else {
         positioning = FALSE;
@@ -375,7 +442,7 @@ void positionOrigin(int action, POINT &pt) {
         deskOrigin.y = pt.y;
         updateCanvasSize(pt);
         clearColor.SetValue(0x007f7f7f);
-        g->Clear(clearColor);
+        gCanvas->Clear(clearColor);
     }
 }
 BOOL ColorDialog ( HWND hWnd, COLORREF &clr ) {
@@ -412,46 +479,6 @@ BOOL ColorDialog ( HWND hWnd, COLORREF &clr ) {
         clr = dlgColor.rgbResult;
     }
     return TRUE;
-}
-void updateMainWindow() {
-    HDC hdc = GetDC(hMainWnd);
-    HFONT hlabelFont = CreateFontIndirect(&labelSettings.labelFont);
-    HFONT hFontOld = (HFONT)SelectObject(hdc, hlabelFont);
-    DeleteObject(hFontOld);
-
-    if(fontPlus) {
-        delete fontPlus;
-    }
-    fontPlus = new Font(hdc, hlabelFont);
-    ReleaseDC(hMainWnd, hdc);
-    RectF box;
-    PointF origin(0, 0);
-    g->MeasureString(L"\u263b - KeyCastOW OFF", 16, fontPlus, origin, &box);
-    REAL unitH = box.Height+2*labelSettings.borderSize+labelSpacing;
-    labelCount = canvasSize.cy / (int)unitH;
-
-    DWORD offset = 0;
-    if(labelCount > maximumLines) {
-        offset = labelCount-maximumLines;
-        labelCount = maximumLines;
-    } else if(labelCount == 0) {
-        offset = labelCount-1;
-        labelCount = 1;
-    }
-
-    g->Clear(clearColor);
-    for(DWORD i = 0; i < labelCount; i ++) {
-        keyLabels[i].rect.X = (REAL)labelSettings.borderSize;
-        keyLabels[i].rect.Y = unitH*(i+offset) + box.Height - labelSettings.borderSize;
-        if(keyLabels[i].time > labelSettings.lingerTime+labelSettings.fadeDuration) {
-            keyLabels[i].time = labelSettings.lingerTime+labelSettings.fadeDuration;
-        }
-        if(keyLabels[i].time > 0) {
-            updateLabel(i);
-        }
-    }
-
-    stamp(hWndStamp, branding);
 }
 HWND CreateToolTip(HWND hDlg, int toolID, LPWSTR pszText) {
     // Get the window of the tool.
@@ -798,26 +825,26 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                         cf.nSizeMax       = 0 ;
 
                         if(ChooseFont (&cf)) {
-                            updateMainWindow();
+                            prepareLabels();
                             saveSettings();
                         }
                     }
                     return TRUE;
                 case IDC_TEXTCOLOR:
                     if( ColorDialog(hwndDlg, previewLabelSettings.textColor) ) {
-                        updateMainWindow();
+                        prepareLabels();
                         saveSettings();
                     }
                     return TRUE;
                 case IDC_BGCOLOR:
                     if( ColorDialog(hwndDlg, previewLabelSettings.bgColor) ) {
-                        updateMainWindow();
+                        prepareLabels();
                         saveSettings();
                     }
                     return TRUE;
                 case IDC_BORDERCOLOR:
                     if( ColorDialog(hwndDlg, previewLabelSettings.borderColor) ) {
-                        updateMainWindow();
+                        prepareLabels();
                         saveSettings();
                     }
                     return TRUE;
@@ -825,7 +852,7 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     {
                         alignment = ComboBox_GetCurSel(GetDlgItem(hwndDlg, IDC_ALIGNMENT));
                         clearColor.SetValue(0x7f7f7f7f);
-                        g->Clear(clearColor);
+                        gCanvas->Clear(clearColor);
                         showText(L"\u254b", 1);
                         fadeLastLabel(FALSE);
                         positioning = TRUE;
@@ -874,7 +901,7 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                             MessageBox(NULL, L"Unable to register hotkey, you probably need go to settings to redefine your hotkey for toggle capturing.", L"Warning", MB_OK|MB_ICONWARNING);
                         }
                     }
-                    updateMainWindow();
+                    prepareLabels();
                     saveSettings();
                 case IDCANCEL:
                     EndDialog(hwndDlg, wParam);
@@ -987,7 +1014,7 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
                     case MENU_RESTORE:
                         initSettings();
                         saveSettings();
-                        updateMainWindow();
+                        prepareLabels();
                         break;
                     case MENU_EXIT:
                         Shell_NotifyIcon( NIM_DELETE, &nid );
@@ -1003,7 +1030,7 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
             break;
         case WM_DISPLAYCHANGE:
             getDesktopRect();
-            updateMainWindow();
+            prepareLabels();
             break;
         default:
             return DefWindowProc(hWnd, message, wParam, lParam);
@@ -1082,17 +1109,8 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     }
     UpdateWindow(hMainWnd);
 
-    HDC hdc = GetDC(hMainWnd);
-    HDC hdcBuffer = CreateCompatibleDC(hdc);
-    HBITMAP hbitmap = CreateCompatibleBitmap(hdc, desktopRect.right - desktopRect.left, desktopRect.bottom - desktopRect.top);
-    HBITMAP hBitmapOld = (HBITMAP)SelectObject(hdcBuffer, (HGDIOBJ)hbitmap);
-    ReleaseDC(hMainWnd, hdc);
-    DeleteObject(hBitmapOld);
-    g = new Graphics(hdcBuffer);
-    g->SetSmoothingMode(SmoothingModeAntiAlias);
-    g->SetTextRenderingHint(TextRenderingHintAntiAlias);
-
-    updateMainWindow();
+    createCanvas();
+    prepareLabels();
     ShowWindow(hMainWnd, SW_SHOW);
     HFONT hlabelFont = CreateFont(20,10,0,0,FW_BLACK,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_OUTLINE_PRECIS,
                 CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY, VARIABLE_PITCH,TEXT("Arial"));
@@ -1128,7 +1146,7 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     UnhookWindowsHookEx(kbdhook);
     UnhookWindowsHookEx(moshook);
     UnregisterHotKey(NULL, 1);
-    delete g;
+    delete gCanvas;
     delete fontPlus;
 
     GdiplusShutdown(gdiplusToken);
