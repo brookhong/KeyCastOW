@@ -18,6 +18,8 @@ using namespace Gdiplus;
 CTimer showTimer;
 CTimer previewTimer;
 
+WCHAR iniFile[MAX_PATH];
+
 #define MAXCHARS 4096
 WCHAR textBuffer[MAXCHARS];
 LPCWSTR textBufferEnd = textBuffer + MAXCHARS;
@@ -38,37 +40,11 @@ struct LabelSettings {
     DWORD keyStrokeDelay;
     DWORD lingerTime;
     DWORD fadeDuration;
-    LOGFONT labelFont;
+    LOGFONT font;
     COLORREF bgColor, textColor, borderColor;
     DWORD bgOpacity, textOpacity, borderOpacity;
     int borderSize;
     int cornerSize;
-    void reset() {
-        keyStrokeDelay = 500;
-        lingerTime = 1200;
-        fadeDuration = 600;
-        bgColor = RGB(75, 75, 75);
-        textColor = RGB(255, 255, 255);
-        borderColor = RGB(0, 128, 255);
-        bgOpacity = 127;
-        textOpacity = 255;
-        borderOpacity = 198;
-        borderSize = 8;
-        cornerSize = 16;
-        memset(&labelFont, 0, sizeof(labelFont));
-        labelFont.lfCharSet = DEFAULT_CHARSET;
-        labelFont.lfHeight = -37;
-        labelFont.lfPitchAndFamily = DEFAULT_PITCH;
-        labelFont.lfWeight  = FW_BLACK;
-        labelFont.lfOutPrecision = OUT_DEFAULT_PRECIS;
-        labelFont.lfClipPrecision = CLIP_DEFAULT_PRECIS;
-        labelFont.lfQuality = ANTIALIASED_QUALITY;
-        // incidently clear global variables in debug mode
-        wcscpy_s(labelFont.lfFaceName, LF_FACESIZE, TEXT("Arial Black"));
-    }
-    LabelSettings() {
-        reset();
-    }
 };
 LabelSettings labelSettings, previewLabelSettings;
 DWORD labelSpacing;
@@ -378,7 +354,7 @@ void createCanvas() {
 }
 void prepareLabels() {
     HDC hdc = GetDC(hMainWnd);
-    HFONT hlabelFont = CreateFontIndirect(&labelSettings.labelFont);
+    HFONT hlabelFont = CreateFontIndirect(&labelSettings.font);
     HFONT hFontOld = (HFONT)SelectObject(hdc, hlabelFont);
     DeleteObject(hFontOld);
 
@@ -515,132 +491,79 @@ HWND CreateToolTip(HWND hDlg, int toolID, LPWSTR pszText) {
 
     return hwndTip;
 }
-void initSettings() {
-    labelSettings.reset();
-    previewLabelSettings.reset();
-    labelSpacing = 30;
-    maximumLines = 10;
-    wcscpy_s(branding, BRANDINGMAX, TEXT("Hi there, press any key to try, double click to configure."));
-    wcscpy_s(comboChars, sizeof(comboChars), TEXT("<->"));
-    deskOrigin.x = desktopRect.right - desktopRect.left - labelSettings.borderSize;
-    deskOrigin.y = desktopRect.bottom - desktopRect.top;
-    SetWindowPos(hDlgSettings, 0,
-            desktopRect.right - desktopRect.left - settingsDlgRect.right + settingsDlgRect.left,
-            desktopRect.bottom - desktopRect.top - settingsDlgRect.bottom + settingsDlgRect.top, 0, 0, SWP_NOSIZE);
-    visibleShift = FALSE;
-    visibleModifier = TRUE;
-    mouseCapturing = TRUE;
-    mouseCapturingMod = FALSE;
-    keyAutoRepeat = TRUE;
-    mergeMouseActions = TRUE;
-    alignment = 1;
-    onlyCommandKeys = FALSE;
-    tcModifiers = MOD_ALT;
-    tcKey = 0x42;
+void writeSettingInt(LPCTSTR lpKeyName, DWORD dw) {
+    WCHAR tmp[256];
+    swprintf(tmp, 256, L"%u", dw);
+    WritePrivateProfileString(L"KeyCastOW", lpKeyName, tmp, iniFile);
 }
-BOOL saveSettings() {
-    BOOL res = TRUE;
-
-    HKEY hRootKey, hChildKey;
-    if(RegOpenCurrentUser(KEY_WRITE, &hRootKey) != ERROR_SUCCESS)
-        return FALSE;
-
-    if(RegCreateKeyEx(hRootKey, L"Software\\KeyCastOW", 0, NULL, REG_OPTION_NON_VOLATILE, KEY_READ | KEY_WRITE, NULL, &hChildKey, NULL) != ERROR_SUCCESS) {
-        RegCloseKey(hRootKey);
-        return FALSE;
-    }
-
-    if(RegSetKeyValue(hChildKey, NULL, L"keyStrokeDelay", REG_DWORD, (LPCVOID)&labelSettings.keyStrokeDelay, sizeof(labelSettings.keyStrokeDelay)) != ERROR_SUCCESS) {
-        res = FALSE;
-    }
-
-    RegSetKeyValue(hChildKey, NULL, L"lingerTime", REG_DWORD, (LPCVOID)&labelSettings.lingerTime, sizeof(labelSettings.lingerTime));
-    RegSetKeyValue(hChildKey, NULL, L"fadeDuration", REG_DWORD, (LPCVOID)&labelSettings.fadeDuration, sizeof(labelSettings.fadeDuration));
-    RegSetKeyValue(hChildKey, NULL, L"bgColor", REG_DWORD, (LPCVOID)&labelSettings.bgColor, sizeof(labelSettings.bgColor));
-    RegSetKeyValue(hChildKey, NULL, L"textColor", REG_DWORD, (LPCVOID)&labelSettings.textColor, sizeof(labelSettings.textColor));
-    RegSetKeyValue(hChildKey, NULL, L"labelFont", REG_BINARY, (LPCVOID)&labelSettings.labelFont, sizeof(labelSettings.labelFont));
-    RegSetKeyValue(hChildKey, NULL, L"bgOpacity", REG_DWORD, (LPCVOID)&labelSettings.bgOpacity, sizeof(labelSettings.bgOpacity));
-    RegSetKeyValue(hChildKey, NULL, L"textOpacity", REG_DWORD, (LPCVOID)&labelSettings.textOpacity, sizeof(labelSettings.textOpacity));
-    RegSetKeyValue(hChildKey, NULL, L"borderOpacity", REG_DWORD, (LPCVOID)&labelSettings.borderOpacity, sizeof(labelSettings.borderOpacity));
-    RegSetKeyValue(hChildKey, NULL, L"borderColor", REG_DWORD, (LPCVOID)&labelSettings.borderColor, sizeof(labelSettings.borderColor));
-    RegSetKeyValue(hChildKey, NULL, L"borderSize", REG_DWORD, (LPCVOID)&labelSettings.borderSize, sizeof(labelSettings.borderSize));
-    RegSetKeyValue(hChildKey, NULL, L"cornerSize", REG_DWORD, (LPCVOID)&labelSettings.cornerSize, sizeof(labelSettings.cornerSize));
-    RegSetKeyValue(hChildKey, NULL, L"labelSpacing", REG_DWORD, (LPCVOID)&labelSpacing, sizeof(labelSpacing));
-    RegSetKeyValue(hChildKey, NULL, L"maximumLines", REG_DWORD, (LPCVOID)&maximumLines, sizeof(maximumLines));
-    RegSetKeyValue(hChildKey, NULL, L"offsetX", REG_DWORD, (LPCVOID)&deskOrigin.x, sizeof(deskOrigin.x));
-    RegSetKeyValue(hChildKey, NULL, L"offsetY", REG_DWORD, (LPCVOID)&deskOrigin.y, sizeof(deskOrigin.y));
-    RegSetKeyValue(hChildKey, NULL, L"visibleShift", REG_DWORD, (LPCVOID)&visibleShift, sizeof(visibleShift));
-    RegSetKeyValue(hChildKey, NULL, L"visibleModifier", REG_DWORD, (LPCVOID)&visibleModifier, sizeof(visibleModifier));
-    RegSetKeyValue(hChildKey, NULL, L"mouseCapturing", REG_DWORD, (LPCVOID)&mouseCapturing, sizeof(mouseCapturing));
-    RegSetKeyValue(hChildKey, NULL, L"mouseCapturingMod", REG_DWORD, (LPCVOID)&mouseCapturingMod, sizeof(mouseCapturingMod));
-    RegSetKeyValue(hChildKey, NULL, L"keyAutoRepeat", REG_DWORD, (LPCVOID)&keyAutoRepeat, sizeof(keyAutoRepeat));
-    RegSetKeyValue(hChildKey, NULL, L"mergeMouseActions", REG_DWORD, (LPCVOID)&mergeMouseActions, sizeof(mergeMouseActions));
-    RegSetKeyValue(hChildKey, NULL, L"alignment", REG_DWORD, (LPCVOID)&alignment, sizeof(alignment));
-    RegSetKeyValue(hChildKey, NULL, L"onlyCommandKeys", REG_DWORD, (LPCVOID)&onlyCommandKeys, sizeof(onlyCommandKeys));
-    RegSetKeyValue(hChildKey, NULL, L"tcModifiers", REG_DWORD, (LPCVOID)&tcModifiers, sizeof(tcModifiers));
-    RegSetKeyValue(hChildKey, NULL, L"tcKey", REG_DWORD, (LPCVOID)&tcKey, sizeof(tcKey));
-    RegSetKeyValue(hChildKey, NULL, L"branding", REG_SZ, (LPCVOID)branding, (wcslen(branding)+1)*sizeof(WCHAR));
-    RegSetKeyValue(hChildKey, NULL, L"comboChars", REG_SZ, (LPCVOID)comboChars, (wcslen(comboChars)+1)*sizeof(WCHAR));
-
-    RegCloseKey(hRootKey);
-    RegCloseKey(hChildKey);
-    return res;
+void saveSettings() {
+    writeSettingInt(L"lingerTime", labelSettings.lingerTime);
+    writeSettingInt(L"fadeDuration", labelSettings.fadeDuration);
+    writeSettingInt(L"bgColor", labelSettings.bgColor);
+    writeSettingInt(L"textColor", labelSettings.textColor);
+    WritePrivateProfileStruct(L"KeyCastOW", L"labelFont", (LPVOID)&labelSettings.font, sizeof(labelSettings.font), iniFile);
+    writeSettingInt(L"bgOpacity", labelSettings.bgOpacity);
+    writeSettingInt(L"textOpacity", labelSettings.textOpacity);
+    writeSettingInt(L"borderOpacity", labelSettings.borderOpacity);
+    writeSettingInt(L"borderColor", labelSettings.borderColor);
+    writeSettingInt(L"borderSize", labelSettings.borderSize);
+    writeSettingInt(L"cornerSize", labelSettings.cornerSize);
+    writeSettingInt(L"labelSpacing", labelSpacing);
+    writeSettingInt(L"maximumLines", maximumLines);
+    writeSettingInt(L"offsetX", deskOrigin.x);
+    writeSettingInt(L"offsetY", deskOrigin.y);
+    writeSettingInt(L"visibleShift", visibleShift);
+    writeSettingInt(L"visibleModifier", visibleModifier);
+    writeSettingInt(L"mouseCapturing", mouseCapturing);
+    writeSettingInt(L"mouseCapturingMod", mouseCapturingMod);
+    writeSettingInt(L"keyAutoRepeat", keyAutoRepeat);
+    writeSettingInt(L"mergeMouseActions", mergeMouseActions);
+    writeSettingInt(L"alignment", alignment);
+    writeSettingInt(L"onlyCommandKeys", onlyCommandKeys);
+    writeSettingInt(L"tcModifiers", tcModifiers);
+    writeSettingInt(L"tcKey", tcKey);
+    writeSettingInt(L"textColor", labelSettings.textColor);
+    WritePrivateProfileString(L"KeyCastOW", L"branding", branding, iniFile);
+    WritePrivateProfileString(L"KeyCastOW", L"comboChars", comboChars, iniFile);
 }
-BOOL loadSettings() {
-    BOOL res = TRUE;
-    HKEY hRootKey, hChildKey;
-    DWORD disposition; // For checking if key was created or only opened
-    initSettings();
-    if(RegOpenCurrentUser(KEY_WRITE | KEY_READ, &hRootKey) != ERROR_SUCCESS)
-        return FALSE;
-    if(RegCreateKeyEx(hRootKey, TEXT("SOFTWARE\\KeyCastOW"), 0, NULL, REG_OPTION_NON_VOLATILE, KEY_READ | KEY_WRITE,
-                NULL, &hChildKey, &disposition) != ERROR_SUCCESS) {
-        RegCloseKey(hRootKey);
-        return FALSE;
-    }
-
-    DWORD size = sizeof(DWORD);
-    if(disposition == REG_OPENED_EXISTING_KEY) {
-        RegGetValue(hChildKey, NULL, L"keyStrokeDelay", RRF_RT_DWORD, NULL, &labelSettings.keyStrokeDelay, &size);
-        RegGetValue(hChildKey, NULL, L"lingerTime", RRF_RT_DWORD, NULL, &labelSettings.lingerTime, &size);
-        RegGetValue(hChildKey, NULL, L"fadeDuration", RRF_RT_DWORD, NULL, &labelSettings.fadeDuration, &size);
-        RegGetValue(hChildKey, NULL, L"bgColor", RRF_RT_DWORD, NULL, &labelSettings.bgColor, &size);
-        RegGetValue(hChildKey, NULL, L"textColor", RRF_RT_DWORD, NULL, &labelSettings.textColor, &size);
-        RegGetValue(hChildKey, NULL, L"bgOpacity", RRF_RT_DWORD, NULL, &labelSettings.bgOpacity, &size);
-        RegGetValue(hChildKey, NULL, L"textOpacity", RRF_RT_DWORD, NULL, &labelSettings.textOpacity, &size);
-        RegGetValue(hChildKey, NULL, L"borderOpacity", RRF_RT_DWORD, NULL, &labelSettings.borderOpacity, &size);
-        RegGetValue(hChildKey, NULL, L"borderColor", RRF_RT_DWORD, NULL, &labelSettings.borderColor, &size);
-        RegGetValue(hChildKey, NULL, L"borderSize", RRF_RT_DWORD, NULL, &labelSettings.borderSize, &size);
-        RegGetValue(hChildKey, NULL, L"cornerSize", RRF_RT_DWORD, NULL, &labelSettings.cornerSize, &size);
-        RegGetValue(hChildKey, NULL, L"labelSpacing", RRF_RT_DWORD, NULL, &labelSpacing, &size);
-        RegGetValue(hChildKey, NULL, L"maximumLines", RRF_RT_DWORD, NULL, &maximumLines, &size);
-        RegGetValue(hChildKey, NULL, L"offsetX", RRF_RT_DWORD, NULL, &deskOrigin.x, &size);
-        RegGetValue(hChildKey, NULL, L"offsetY", RRF_RT_DWORD, NULL, &deskOrigin.y, &size);
-        RegGetValue(hChildKey, NULL, L"visibleShift", RRF_RT_DWORD, NULL, &visibleShift, &size);
-        RegGetValue(hChildKey, NULL, L"visibleModifier", RRF_RT_DWORD, NULL, &visibleModifier, &size);
-        RegGetValue(hChildKey, NULL, L"mouseCapturing", RRF_RT_DWORD, NULL, &mouseCapturing, &size);
-        RegGetValue(hChildKey, NULL, L"mouseCapturingMod", RRF_RT_DWORD, NULL, &mouseCapturingMod, &size);
-        RegGetValue(hChildKey, NULL, L"keyAutoRepeat", RRF_RT_DWORD, NULL, &keyAutoRepeat, &size);
-        RegGetValue(hChildKey, NULL, L"mergeMouseActions", RRF_RT_DWORD, NULL, &mergeMouseActions, &size);
-        RegGetValue(hChildKey, NULL, L"alignment", RRF_RT_DWORD, NULL, &alignment, &size);
-        RegGetValue(hChildKey, NULL, L"onlyCommandKeys", RRF_RT_DWORD, NULL, &onlyCommandKeys, &size);
-        RegGetValue(hChildKey, NULL, L"tcModifiers", RRF_RT_DWORD, NULL, &tcModifiers, &size);
-        RegGetValue(hChildKey, NULL, L"tcKey", RRF_RT_DWORD, NULL, &tcKey, &size);
-        size = sizeof(branding);
-        RegGetValue(hChildKey, NULL, L"branding", RRF_RT_REG_SZ, NULL, branding, &size);
-        size = sizeof(comboChars);
-        RegGetValue(hChildKey, NULL, L"comboChars", RRF_RT_REG_SZ, NULL, comboChars, &size);
-
-        size = sizeof(labelSettings.labelFont);
-        RegGetValue(hChildKey, NULL, L"labelFont", RRF_RT_REG_BINARY, NULL, &labelSettings.labelFont, &size);
-    } else {
-        saveSettings();
-    }
-
-    RegCloseKey(hRootKey);
-    RegCloseKey(hChildKey);
-    previewLabelSettings = labelSettings;
-    return res;
+void loadSettings() {
+    labelSettings.keyStrokeDelay = GetPrivateProfileInt(L"KeyCastOW", L"keyStrokeDelay", 500, iniFile);
+    labelSettings.lingerTime = GetPrivateProfileInt(L"KeyCastOW", L"lingerTime", 1200, iniFile);
+    labelSettings.fadeDuration = GetPrivateProfileInt(L"KeyCastOW", L"fadeDuration", 600, iniFile);
+    labelSettings.bgColor = GetPrivateProfileInt(L"KeyCastOW", L"bgColor", RGB(75, 75, 75), iniFile);
+    labelSettings.textColor = GetPrivateProfileInt(L"KeyCastOW", L"textColor", RGB(255, 255, 255), iniFile);
+    labelSettings.bgOpacity = GetPrivateProfileInt(L"KeyCastOW", L"bgOpacity", 200, iniFile);
+    labelSettings.textOpacity = GetPrivateProfileInt(L"KeyCastOW", L"textOpacity", 255, iniFile);
+    labelSettings.borderOpacity = GetPrivateProfileInt(L"KeyCastOW", L"borderOpacity", 200, iniFile);
+    labelSettings.borderColor = GetPrivateProfileInt(L"KeyCastOW", L"borderColor", RGB(0, 128, 255), iniFile);
+    labelSettings.borderSize = GetPrivateProfileInt(L"KeyCastOW", L"borderSize", 8, iniFile);
+    labelSettings.cornerSize = GetPrivateProfileInt(L"KeyCastOW", L"cornerSize", 2, iniFile);
+    labelSpacing = GetPrivateProfileInt(L"KeyCastOW", L"labelSpacing", 1, iniFile);
+    maximumLines = GetPrivateProfileInt(L"KeyCastOW", L"maximumLines", 10, iniFile);
+    deskOrigin.x = GetPrivateProfileInt(L"KeyCastOW", L"offsetX", desktopRect.right - desktopRect.left - labelSettings.borderSize, iniFile);
+    deskOrigin.y = GetPrivateProfileInt(L"KeyCastOW", L"offsetY", desktopRect.bottom - desktopRect.top, iniFile);
+    visibleShift = GetPrivateProfileInt(L"KeyCastOW", L"visibleShift", 0, iniFile);
+    visibleModifier = GetPrivateProfileInt(L"KeyCastOW", L"visibleModifier", 1, iniFile);
+    mouseCapturing = GetPrivateProfileInt(L"KeyCastOW", L"mouseCapturing", 1, iniFile);
+    mouseCapturingMod = GetPrivateProfileInt(L"KeyCastOW", L"mouseCapturingMod", 0, iniFile);
+    keyAutoRepeat = GetPrivateProfileInt(L"KeyCastOW", L"keyAutoRepeat", 1, iniFile);
+    mergeMouseActions = GetPrivateProfileInt(L"KeyCastOW", L"mergeMouseActions", 1, iniFile);
+    alignment = GetPrivateProfileInt(L"KeyCastOW", L"alignment", 1, iniFile);
+    onlyCommandKeys = GetPrivateProfileInt(L"KeyCastOW", L"onlyCommandKeys", 0, iniFile);
+    tcModifiers = GetPrivateProfileInt(L"KeyCastOW", L"tcModifiers", MOD_ALT, iniFile);
+    tcKey = GetPrivateProfileInt(L"KeyCastOW", L"tcKey", 0x42, iniFile);
+    GetPrivateProfileString(L"KeyCastOW", L"branding", L"Hi there, press any key to try, double click to configure.", branding, BRANDINGMAX, iniFile);
+    GetPrivateProfileString(L"KeyCastOW", L"comboChars", L"<->", comboChars, 4, iniFile);
+    memset(&labelSettings.font, 0, sizeof(labelSettings.font));
+    labelSettings.font.lfCharSet = DEFAULT_CHARSET;
+    labelSettings.font.lfHeight = -37;
+    labelSettings.font.lfPitchAndFamily = DEFAULT_PITCH;
+    labelSettings.font.lfWeight  = FW_BLACK;
+    labelSettings.font.lfOutPrecision = OUT_DEFAULT_PRECIS;
+    labelSettings.font.lfClipPrecision = CLIP_DEFAULT_PRECIS;
+    labelSettings.font.lfQuality = ANTIALIASED_QUALITY;
+    wcscpy_s(labelSettings.font.lfFaceName, LF_FACESIZE, TEXT("Arial Black"));
+    GetPrivateProfileStruct(L"KeyCastOW", L"labelFont", &labelSettings.font, sizeof(labelSettings.font), iniFile);
 }
 void renderSettingsData(HWND hwndDlg) {
     WCHAR tmp[256];
@@ -741,7 +664,7 @@ static void previewLabel() {
     g.SetTextRenderingHint(TextRenderingHintAntiAlias);
 
     WCHAR text[] = L"BH";
-    HFONT hFont = CreateFontIndirect(&previewLabelSettings.labelFont);
+    HFONT hFont = CreateFontIndirect(&previewLabelSettings.font);
     SelectObject(memDC, hFont);
     Font font(memDC, hFont);
 
@@ -809,7 +732,7 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                         cf.lStructSize    = sizeof (CHOOSEFONT) ;
                         cf.hwndOwner      = hwndDlg ;
                         cf.hDC            = NULL ;
-                        cf.lpLogFont      = &previewLabelSettings.labelFont ;
+                        cf.lpLogFont      = &previewLabelSettings.font ;
                         cf.iPointSize     = 0 ;
                         cf.Flags          = CF_INITTOLOGFONTSTRUCT | CF_SCREENFONTS | CF_EFFECTS ;
                         cf.rgbColors      = 0 ;
@@ -948,11 +871,6 @@ LRESULT CALLBACK DraggableWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
     return 0;
 }
 
-void getDesktopRect() {
-    SystemParametersInfo(SPI_GETWORKAREA,NULL,&desktopRect,NULL);
-
-    updateCanvasSize(deskOrigin);
-}
 LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     static POINT s_last_mouse;
     static HMENU hPopMenu;
@@ -1010,8 +928,8 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
                         previewTimer.Start(PREVIEWTIMER_INTERVAL);
                         break;
                     case MENU_RESTORE:
-                        initSettings();
-                        saveSettings();
+                        DeleteFile(iniFile);
+                        loadSettings();
                         prepareLabels();
                         break;
                     case MENU_EXIT:
@@ -1026,10 +944,10 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
         case WM_DESTROY:
             PostQuitMessage(0);
             break;
-        case WM_DISPLAYCHANGE:
-            getDesktopRect();
-            prepareLabels();
-            break;
+        // case WM_DISPLAYCHANGE:
+            // getDesktopRect();
+            // prepareLabels();
+            // break;
         default:
             return DefWindowProc(hWnd, message, wParam, lParam);
     }
@@ -1066,6 +984,10 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         |ICC_UPDOWN_CLASS|ICC_USEREX_CLASSES|ICC_WIN95_CLASSES;
     InitCommonControlsEx(&icex);
 
+    GetModuleFileName(NULL, iniFile, MAX_PATH);
+    iniFile[wcslen(iniFile)-4] = '\0';
+    wcscat_s(iniFile, MAX_PATH, L".ini");
+
     GdiplusStartupInput gdiplusStartupInput;
     ULONG_PTR           gdiplusToken;
     GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
@@ -1092,8 +1014,9 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         return 0;
     }
 
+    SystemParametersInfo(SPI_GETWORKAREA,NULL,&desktopRect,NULL);
     loadSettings();
-    getDesktopRect();
+    updateCanvasSize(deskOrigin);
     hDlgSettings = CreateDialog(hThisInst, MAKEINTRESOURCE(IDD_DLGSETTINGS), NULL, (DLGPROC)SettingsWndProc);
     MyRegisterClassEx(hThisInst, L"STAMP", DraggableWndProc);
     hWndStamp = CreateWindowEx(
