@@ -186,6 +186,23 @@ void eraseLabel(int i) {
     gCanvas->Clear(clearColor);
     gCanvas->ResetClip();
 }
+void drawLabelFrame(Graphics* g, const Pen* pen, const Brush* brush, RectF &rc, REAL cornerSize) {
+    if(cornerSize > 0) {
+        GraphicsPath path;
+        REAL dx = rc.Width - cornerSize, dy = rc.Height - cornerSize;
+        path.AddArc(rc.X, rc.Y, cornerSize, cornerSize, 170, 90);
+        path.AddArc(rc.X + dx, rc.Y, cornerSize, cornerSize, 270, 90);
+        path.AddArc(rc.X + dx, rc.Y + dy, cornerSize, cornerSize, 0, 90);
+        path.AddArc(rc.X, rc.Y + dy, cornerSize, cornerSize, 90, 90);
+        path.CloseFigure();
+
+        g->DrawPath(pen, &path);
+        g->FillPath(brush, &path);
+    } else {
+        g->DrawRectangle(pen, rc.X, rc.Y, rc.Width, rc.Height);
+        g->FillRectangle(brush, rc.X, rc.Y, rc.Width, rc.Height);
+    }
+}
 #define BR(alpha, bgr) (alpha<<24|bgr>>16|(bgr&0x0000ff00)|(bgr&0x000000ff)<<16)
 void updateLabel(int i) {
     eraseLabel(i);
@@ -204,18 +221,9 @@ void updateLabel(int i) {
         }
         rc.Height = (rc.Height < labelSettings.cornerSize) ? labelSettings.cornerSize : rc.Height;
         int bgAlpha = (int)(r*labelSettings.bgOpacity), textAlpha = (int)(r*labelSettings.textOpacity), borderAlpha = (int)(r*labelSettings.borderOpacity);
-        GraphicsPath path;
-        REAL dx = rc.Width - labelSettings.cornerSize, dy = rc.Height - labelSettings.cornerSize;
-        path.AddArc(rc.X, rc.Y, (REAL)labelSettings.cornerSize, (REAL)labelSettings.cornerSize, 170, 90);
-        path.AddArc(rc.X + dx, rc.Y, (REAL)labelSettings.cornerSize, (REAL)labelSettings.cornerSize, 270, 90);
-        path.AddArc(rc.X + dx, rc.Y + dy, (REAL)labelSettings.cornerSize, (REAL)labelSettings.cornerSize, 0, 90);
-        path.AddArc(rc.X, rc.Y + dy, (REAL)labelSettings.cornerSize, (REAL)labelSettings.cornerSize, 90, 90);
-        path.AddLine(rc.X, rc.Y + dy, rc.X, rc.Y + labelSettings.cornerSize/2);
         Pen penPlus(Color::Color(BR(borderAlpha, labelSettings.borderColor)), labelSettings.borderSize+0.0f);
         SolidBrush brushPlus(Color::Color(BR(bgAlpha, labelSettings.bgColor)));
-        gCanvas->DrawPath(&penPlus, &path);
-        gCanvas->FillPath(&brushPlus, &path);
-
+        drawLabelFrame(gCanvas, &penPlus, &brushPlus, rc, (REAL)labelSettings.cornerSize);
         SolidBrush textBrushPlus(Color(BR(textAlpha, labelSettings.textColor)));
         gCanvas->DrawString( keyLabels[i].text,
                 keyLabels[i].length,
@@ -698,7 +706,6 @@ void getLabelSettings(HWND hwndDlg, LabelSettings &lblSettings) {
     lblSettings.borderSize = _wtoi(tmp);
     GetDlgItemText(hwndDlg, IDC_CORNERSIZE, tmp, 256);
     lblSettings.cornerSize = _wtoi(tmp);
-    lblSettings.cornerSize = (lblSettings.cornerSize > lblSettings.borderSize ) ? lblSettings.cornerSize : lblSettings.borderSize + 1;
 }
 DWORD previewTime = 0;
 #define PREVIEWTIMER_INTERVAL 5
@@ -747,18 +754,9 @@ static void previewLabel() {
     origin.Y = rc.Y;
 
     int bgAlpha = (int)(r*previewLabelSettings.bgOpacity), textAlpha = (int)(r*previewLabelSettings.textOpacity), borderAlpha = (int)(r*previewLabelSettings.borderOpacity);
-    GraphicsPath path;
-    REAL dx = rc.Width - previewLabelSettings.cornerSize, dy = rc.Height - previewLabelSettings.cornerSize;
-    path.AddArc(rc.X, rc.Y, (REAL)previewLabelSettings.cornerSize, (REAL)previewLabelSettings.cornerSize, 170, 90);
-    path.AddArc(rc.X + dx, rc.Y, (REAL)previewLabelSettings.cornerSize, (REAL)previewLabelSettings.cornerSize, 270, 90);
-    path.AddArc(rc.X + dx, rc.Y + dy, (REAL)previewLabelSettings.cornerSize, (REAL)previewLabelSettings.cornerSize, 0, 90);
-    path.AddArc(rc.X, rc.Y + dy, (REAL)previewLabelSettings.cornerSize, (REAL)previewLabelSettings.cornerSize, 90, 90);
-    path.AddLine(rc.X, rc.Y + dy, rc.X, rc.Y + previewLabelSettings.cornerSize/2);
     Pen penPlus(Color::Color(BR(borderAlpha, previewLabelSettings.borderColor)), previewLabelSettings.borderSize+0.0f);
     SolidBrush brushPlus(Color::Color(BR(bgAlpha, previewLabelSettings.bgColor)));
-    g.DrawPath(&penPlus, &path);
-    g.FillPath(&brushPlus, &path);
-
+    drawLabelFrame(&g, &penPlus, &brushPlus, rc, (REAL)previewLabelSettings.cornerSize);
     SolidBrush textBrushPlus(Color(BR(textAlpha, previewLabelSettings.textColor)));
     g.DrawString(text, wcslen(text), &font, origin, &textBrushPlus);
     BitBlt(hdc, rt.left, rt.top, rtWidth, rtHeight, memDC, 0,0, SRCCOPY);

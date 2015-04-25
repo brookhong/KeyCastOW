@@ -265,6 +265,7 @@ void cleanModifier(UINT vk, LPWSTR modifierkeys) {
 }
 
 static WCHAR modifierkey[64] = L"\0";
+static BOOL modifierUsed = FALSE;
 LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
 {
     KBDLLHOOKSTRUCT k = *(KBDLLHOOKSTRUCT *)lp;
@@ -283,6 +284,7 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
         if(k.vkCode >= spk && k.vkCode <= 0xA5 ||
                 k.vkCode == 0x5B || k.vkCode == 0x5C) {
             cleanModifier(k.vkCode, modifierkey);
+            modifierUsed = FALSE;
         }
     } else if(wp == WM_KEYDOWN || wp == WM_SYSKEYDOWN) {
         if(!keyAutoRepeat && lastvk == k.vkCode) {
@@ -299,7 +301,7 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
                 wcscpy_s(tmp, 64, modifierkey);
                 swprintf(modifierkey, 64, L"%s %c %s", tmp, comboChars[1], ck);
             }
-            if(visibleModifier) {
+            if(!modifierUsed && visibleModifier) {
                 swprintf(c, 64, L"%c%s%c", comboChars[0], modifierkey, comboChars[2]);
                 if(lastvk == k.vkCode) {
                     showText(c, 2);
@@ -397,6 +399,7 @@ LRESULT CALLBACK LLMouseProc(int nCode, WPARAM wp, LPARAM lp)
             }
 
             if(modifierkey[0] != '\0') {
+                modifierUsed = TRUE;
                 swprintf(tmp, 64, L"%c%s %c %s%c", comboChars[0], modifierkey, comboChars[1], c, comboChars[2]);
                 showText(tmp, 2);
             } else if(!mouseCapturingMod) {
