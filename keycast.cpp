@@ -174,6 +174,12 @@ void drawLabelFrame(Graphics* g, const Pen* pen, const Brush* brush, RectF &rc, 
 
         g->DrawPath(pen, &path);
         g->FillPath(brush, &path);
+#ifdef _DEBUG
+    std::stringstream line;
+    line << "rc: {" << rc.Width << "," << rc.Height << "};\n";
+    line << "cornerSize: " << cornerSize << ";\n";
+    log("d:\\KeyCastOW.log", line);
+#endif
     } else {
         g->DrawRectangle(pen, rc.X, rc.Y, rc.Width, rc.Height);
         g->FillRectangle(brush, rc.X, rc.Y, rc.Width, rc.Height);
@@ -526,6 +532,14 @@ void saveSettings() {
     WritePrivateProfileString(L"KeyCastOW", L"branding", branding, iniFile);
     WritePrivateProfileString(L"KeyCastOW", L"comboChars", comboChars, iniFile);
 }
+void fixDeskOrigin(int x, int y) {
+    if(deskOrigin.x > x) {
+        deskOrigin.x = x;
+    }
+    if(deskOrigin.y > y) {
+        deskOrigin.y = y;
+    }
+}
 void loadSettings() {
     labelSettings.keyStrokeDelay = GetPrivateProfileInt(L"KeyCastOW", L"keyStrokeDelay", 500, iniFile);
     labelSettings.lingerTime = GetPrivateProfileInt(L"KeyCastOW", L"lingerTime", 1200, iniFile);
@@ -540,8 +554,11 @@ void loadSettings() {
     labelSettings.cornerSize = GetPrivateProfileInt(L"KeyCastOW", L"cornerSize", 2, iniFile);
     labelSpacing = GetPrivateProfileInt(L"KeyCastOW", L"labelSpacing", 1, iniFile);
     maximumLines = GetPrivateProfileInt(L"KeyCastOW", L"maximumLines", 10, iniFile);
-    deskOrigin.x = GetPrivateProfileInt(L"KeyCastOW", L"offsetX", desktopRect.right - desktopRect.left - labelSettings.borderSize, iniFile);
-    deskOrigin.y = GetPrivateProfileInt(L"KeyCastOW", L"offsetY", desktopRect.bottom - desktopRect.top, iniFile);
+    int x = desktopRect.right - desktopRect.left - labelSettings.borderSize;
+    int y = desktopRect.bottom - desktopRect.top;
+    deskOrigin.x = GetPrivateProfileInt(L"KeyCastOW", L"offsetX", x, iniFile);
+    deskOrigin.y = GetPrivateProfileInt(L"KeyCastOW", L"offsetY", y, iniFile);
+    fixDeskOrigin(x, y);
     visibleShift = GetPrivateProfileInt(L"KeyCastOW", L"visibleShift", 0, iniFile);
     visibleModifier = GetPrivateProfileInt(L"KeyCastOW", L"visibleModifier", 1, iniFile);
     mouseCapturing = GetPrivateProfileInt(L"KeyCastOW", L"mouseCapturing", 1, iniFile);
@@ -930,6 +947,8 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
                     case MENU_RESTORE:
                         DeleteFile(iniFile);
                         loadSettings();
+                        updateCanvasSize(deskOrigin);
+                        createCanvas();
                         prepareLabels();
                         break;
                     case MENU_EXIT:
@@ -944,10 +963,13 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
         case WM_DESTROY:
             PostQuitMessage(0);
             break;
-        // case WM_DISPLAYCHANGE:
-            // getDesktopRect();
-            // prepareLabels();
-            // break;
+        case WM_DISPLAYCHANGE:
+            SystemParametersInfo(SPI_GETWORKAREA,NULL,&desktopRect,NULL);
+            fixDeskOrigin(desktopRect.right - desktopRect.left - labelSettings.borderSize, desktopRect.bottom - desktopRect.top);
+            updateCanvasSize(deskOrigin);
+            createCanvas();
+            prepareLabels();
+            break;
         default:
             return DefWindowProc(hWnd, message, wParam, lParam);
     }

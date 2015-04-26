@@ -402,6 +402,9 @@ LRESULT CALLBACK LLMouseProc(int nCode, WPARAM wp, LPARAM lp)
                 modifierUsed = TRUE;
                 swprintf(tmp, 64, L"%c%s %c %s%c", comboChars[0], modifierkey, comboChars[1], c, comboChars[2]);
                 showText(tmp, 2);
+            } else if(GetKeyState(VK_SHIFT) < 0) {
+                swprintf(tmp, 64, L"%cShift %c %s%c", comboChars[0], comboChars[1], c, comboChars[2]);
+                showText(tmp, 2);
             } else if(!mouseCapturingMod) {
                 swprintf(tmp, 64, L"%c%s%c", comboChars[0], c, comboChars[2]);
                 showText(tmp, behavior);
