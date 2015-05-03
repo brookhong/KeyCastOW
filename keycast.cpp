@@ -91,12 +91,49 @@ Font * fontPlus = NULL;
 #define MENU_EXIT      33
 #define MENU_RESTORE   34
 #ifdef _DEBUG
-#include <sstream>
-void log(char * fileName, const std::stringstream & line) {
+WCHAR capFile[MAX_PATH];
+FILE *capStream = NULL;
+WCHAR recordFN[MAX_PATH];
+int replayStatus = 0;
+#define MENU_REPLAY    35
+struct Displayed {
+    DWORD tm;
+    int behavior;
+    size_t len;
+    Displayed(DWORD t, int b, size_t l) {
+        tm = t;
+        behavior = b;
+        len = l;
+    }
+};
+void showText(LPCWSTR text, int behavior);
+DWORD WINAPI replay(LPVOID ptr)
+{
+    replayStatus = 1;
     FILE *stream;
-    errno_t err = fopen_s(&stream, fileName, "a");
-    fprintf(stream,"%s",line.str().c_str());
+    WCHAR tmp[256];
+    errno_t err = _wfopen_s(&stream, (LPCWSTR)ptr, L"rb");
+    Displayed dp(0, 0, 0);
+    fread(&dp, sizeof(Displayed), 1, stream);
+    fread(tmp, sizeof(WCHAR), dp.len, stream);
+    showText(tmp, dp.behavior);
+    DWORD lastTm = dp.tm;
+    while(replayStatus == 1 && fread(&dp, sizeof(Displayed), 1, stream) == 1) {
+        Sleep(dp.tm - lastTm);
+        lastTm = dp.tm;
+        fread(tmp, sizeof(WCHAR), dp.len, stream);
+        tmp[dp.len] = '\0';
+        showText(tmp, dp.behavior);
+    }
     fclose(stream);
+    replayStatus = 0;
+    return 0;
+}
+#include <sstream>
+WCHAR logFile[MAX_PATH];
+FILE *logStream;
+void log(const std::stringstream & line) {
+    fprintf(logStream,"%s",line.str().c_str());
 }
 #endif
 void stamp(HWND hwnd, LPCWSTR text) {
@@ -174,12 +211,6 @@ void drawLabelFrame(Graphics* g, const Pen* pen, const Brush* brush, RectF &rc, 
 
         g->DrawPath(pen, &path);
         g->FillPath(brush, &path);
-#ifdef _DEBUG
-    std::stringstream line;
-    line << "rc: {" << rc.Width << "," << rc.Height << "};\n";
-    line << "cornerSize: " << cornerSize << ";\n";
-    log("d:\\KeyCastOW.log", line);
-#endif
     } else {
         g->DrawRectangle(pen, rc.X, rc.Y, rc.Width, rc.Height);
         g->FillRectangle(brush, rc.X, rc.Y, rc.Width, rc.Height);
@@ -261,13 +292,6 @@ bool outOfLine(LPCWSTR text) {
     gCanvas->MeasureString(keyLabels[labelCount-1].text, keyLabels[labelCount-1].length, fontPlus, origin, &box);
     int cx = (int)box.Width+2*labelSettings.cornerSize+labelSettings.borderSize*2;
     bool out = cx >= canvasSize.cx;
-#ifdef _DEBUG
-    std::stringstream line;
-    line << "deskOrigin: {" << deskOrigin.x << "," << deskOrigin.y << "};\n";
-    line << "cx: " << cx << ";\n";
-    line << "alignment: " << alignment << ";\n";
-    log("d:\\KeyCastOW.log", line);
-#endif
     return out;
 }
 /*
@@ -278,6 +302,16 @@ bool outOfLine(LPCWSTR text) {
 void showText(LPCWSTR text, int behavior = 0) {
     SetWindowPos(hMainWnd,HWND_TOPMOST,0,0,0,0,SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE);
     size_t newLen = wcslen(text);
+
+#ifdef _DEBUG
+    if(replayStatus == 0 && capStream) {
+        Displayed dp(GetTickCount(), behavior, newLen);
+        fwrite(&dp, sizeof(Displayed), 1, capStream);
+        fwrite(text, sizeof(WCHAR), newLen, capStream);
+        fflush(capStream);
+    }
+#endif
+
     DWORD i;
     if(behavior == 2) {
         wcscpy_s(keyLabels[labelCount-1].text, textBufferEnd-keyLabels[labelCount-1].text, text);
@@ -400,7 +434,7 @@ void prepareLabels() {
     stamp(hWndStamp, branding);
 }
 void positionOrigin(int action, POINT &pt) {
-    if (positioning && action == 0) {
+    if (action == 0) {
         updateCanvasSize(pt);
 
         RECT rc = {pt.x-1, pt.y-1, pt.x+1, pt.y+1};
@@ -421,7 +455,7 @@ void positionOrigin(int action, POINT &pt) {
         line << "canvasSize: {" << canvasSize.cx << "," <<  canvasSize.cy << "};\n";
         line << "canvasOrigin: {" << canvasOrigin.x << "," <<  canvasOrigin.y << "};\n";
         line << "labelCount: " << labelCount << "\n";
-        log("d:\\KeyCastOW.log", line);
+        log(line);
 #endif
         WCHAR tmp[256];
         swprintf(tmp, 256, L"%d, %d", pt.x, pt.y);
@@ -911,6 +945,9 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
                 hPopMenu = CreatePopupMenu();
                 AppendMenu( hPopMenu, MF_STRING, MENU_CONFIG,  L"&Settings..." );
                 AppendMenu( hPopMenu, MF_STRING, MENU_RESTORE,  L"&Restore default settings" );
+#ifdef _DEBUG
+                AppendMenu( hPopMenu, MF_STRING, MENU_REPLAY,  L"Re&play" );
+#endif
                 AppendMenu( hPopMenu, MF_STRING, MENU_EXIT,    L"E&xit" );
                 SetMenuDefaultItem( hPopMenu, MENU_CONFIG, FALSE );
             }
@@ -951,6 +988,30 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
                         createCanvas();
                         prepareLabels();
                         break;
+#ifdef _DEBUG
+                    case MENU_REPLAY:
+                        {
+                            if(replayStatus == 1) {
+                                replayStatus = 2;
+                                ModifyMenu( hPopMenu, MENU_REPLAY, MF_STRING, MENU_REPLAY, L"Re&play");
+                            } else {
+                                OPENFILENAME ofn;
+                                ZeroMemory(&ofn, sizeof(OPENFILENAME));
+                                ofn.lStructSize = sizeof(ofn);
+                                ofn.hwndOwner   = NULL;
+                                ofn.hInstance   = hInstance;
+                                ofn.lpstrFile   = recordFN;
+                                ofn.nMaxFile    = sizeof(recordFN);
+                                ofn.Flags = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_PATHMUSTEXIST;
+                                if(GetOpenFileName(&ofn)) {
+                                    unsigned long id = 1;
+                                    CreateThread(NULL,0,replay,recordFN,0,&id);
+                                    ModifyMenu( hPopMenu, MENU_REPLAY, MF_STRING, MENU_REPLAY, L"Stop re&play");
+                                }
+                            }
+                        }
+                        break;
+#endif
                     case MENU_EXIT:
                         Shell_NotifyIcon( NIM_DELETE, &nid );
                         ExitProcess(0);
@@ -1066,6 +1127,19 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
 
     kbdhook = SetWindowsHookEx(WH_KEYBOARD_LL, LLKeyboardProc, hThisInst, NULL);
     moshook = SetWindowsHookEx(WH_MOUSE_LL, LLMouseProc, hThisInst, 0);
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+    _set_abort_behavior(0,_WRITE_ABORT_MSG);
+#ifdef _DEBUG
+    wcscpy_s(capFile, MAX_PATH, iniFile);
+    capFile[wcslen(capFile)-4] = '\0';
+    wcscat_s(capFile, MAX_PATH, L".cap");
+
+    wcscpy_s(logFile, MAX_PATH, iniFile);
+    logFile[wcslen(logFile)-4] = '\0';
+    wcscat_s(logFile, MAX_PATH, L".txt");
+    errno_t err = _wfopen_s(&capStream, capFile, L"wb");
+    err = _wfopen_s(&logStream, logFile, L"a");
+#endif
 
     while( GetMessage(&msg, NULL, 0, 0) )    {
         if (msg.message == WM_HOTKEY) {
@@ -1091,6 +1165,10 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     UnregisterHotKey(NULL, 1);
     delete gCanvas;
     delete fontPlus;
+#ifdef _DEBUG
+    fclose(capStream);
+    fclose(logStream);
+#endif
 
     GdiplusShutdown(gdiplusToken);
     return msg.wParam;
