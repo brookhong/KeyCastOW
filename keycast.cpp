@@ -270,7 +270,9 @@ static void startFade() {
             keyLabels[i].time = 0;
             if(keyLabels[i].length){
                 eraseLabel(i);
-                keyLabels[i].length = 0;
+                // erase keyLabels[i].length times to avoid remaining shadow
+                keyLabels[i].length--;
+                dirty = TRUE;
             }
         }
     }
@@ -577,7 +579,7 @@ void fixDeskOrigin(int x, int y) {
 void loadSettings() {
     labelSettings.keyStrokeDelay = GetPrivateProfileInt(L"KeyCastOW", L"keyStrokeDelay", 500, iniFile);
     labelSettings.lingerTime = GetPrivateProfileInt(L"KeyCastOW", L"lingerTime", 1200, iniFile);
-    labelSettings.fadeDuration = GetPrivateProfileInt(L"KeyCastOW", L"fadeDuration", 600, iniFile);
+    labelSettings.fadeDuration = GetPrivateProfileInt(L"KeyCastOW", L"fadeDuration", 310, iniFile);
     labelSettings.bgColor = GetPrivateProfileInt(L"KeyCastOW", L"bgColor", RGB(75, 75, 75), iniFile);
     labelSettings.textColor = GetPrivateProfileInt(L"KeyCastOW", L"textColor", RGB(255, 255, 255), iniFile);
     labelSettings.bgOpacity = GetPrivateProfileInt(L"KeyCastOW", L"bgOpacity", 200, iniFile);
