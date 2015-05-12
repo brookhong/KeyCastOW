@@ -435,15 +435,20 @@ void prepareLabels() {
 
     stamp(hWndStamp, branding);
 }
+
+void GetWorkAreaByOrigin(const POINT &pt, MONITORINFO &mi) {
+    RECT rc = {pt.x-1, pt.y-1, pt.x+1, pt.y+1};
+    HMONITOR hMonitor = MonitorFromRect(&rc, MONITOR_DEFAULTTONEAREST);
+    mi.cbSize = sizeof(mi);
+    GetMonitorInfo(hMonitor, &mi);
+}
+
 void positionOrigin(int action, POINT &pt) {
     if (action == 0) {
         updateCanvasSize(pt);
 
-        RECT rc = {pt.x-1, pt.y-1, pt.x+1, pt.y+1};
-        HMONITOR hMonitor = MonitorFromRect(&rc, MONITOR_DEFAULTTONEAREST);
         MONITORINFO mi;
-        mi.cbSize = sizeof(mi);
-        GetMonitorInfo(hMonitor, &mi);
+        GetWorkAreaByOrigin(pt, mi);
         if(mi.rcWork.left != desktopRect.left || mi.rcWork.top != desktopRect.top) {
             CopyMemory(&desktopRect, &mi.rcWork, sizeof(RECT));
             MoveWindow(hMainWnd, desktopRect.left, desktopRect.top, 1, 1, TRUE);
@@ -535,7 +540,7 @@ HWND CreateToolTip(HWND hDlg, int toolID, LPWSTR pszText) {
 }
 void writeSettingInt(LPCTSTR lpKeyName, DWORD dw) {
     WCHAR tmp[256];
-    swprintf(tmp, 256, L"%u", dw);
+    swprintf(tmp, 256, L"%d", dw);
     WritePrivateProfileString(L"KeyCastOW", lpKeyName, tmp, iniFile);
 }
 void saveSettings() {
@@ -568,12 +573,12 @@ void saveSettings() {
     WritePrivateProfileString(L"KeyCastOW", L"branding", branding, iniFile);
     WritePrivateProfileString(L"KeyCastOW", L"comboChars", comboChars, iniFile);
 }
-void fixDeskOrigin(int x, int y) {
-    if(deskOrigin.x > x) {
-        deskOrigin.x = x;
+void fixDeskOrigin() {
+    if(deskOrigin.x > desktopRect.right || deskOrigin.x < desktopRect.left + labelSettings.borderSize) {
+        deskOrigin.x = desktopRect.right - labelSettings.borderSize;
     }
-    if(deskOrigin.y > y) {
-        deskOrigin.y = y;
+    if(deskOrigin.y > desktopRect.bottom || deskOrigin.y < desktopRect.top + labelSettings.borderSize) {
+        deskOrigin.y = desktopRect.bottom;
     }
 }
 void loadSettings() {
@@ -590,11 +595,13 @@ void loadSettings() {
     labelSettings.cornerSize = GetPrivateProfileInt(L"KeyCastOW", L"cornerSize", 2, iniFile);
     labelSpacing = GetPrivateProfileInt(L"KeyCastOW", L"labelSpacing", 1, iniFile);
     maximumLines = GetPrivateProfileInt(L"KeyCastOW", L"maximumLines", 10, iniFile);
-    int x = desktopRect.right - desktopRect.left - labelSettings.borderSize;
-    int y = desktopRect.bottom - desktopRect.top;
-    deskOrigin.x = GetPrivateProfileInt(L"KeyCastOW", L"offsetX", x, iniFile);
-    deskOrigin.y = GetPrivateProfileInt(L"KeyCastOW", L"offsetY", y, iniFile);
-    fixDeskOrigin(x, y);
+    deskOrigin.x = GetPrivateProfileInt(L"KeyCastOW", L"offsetX", 2, iniFile);
+    deskOrigin.y = GetPrivateProfileInt(L"KeyCastOW", L"offsetY", 2, iniFile);
+    MONITORINFO mi;
+    GetWorkAreaByOrigin(deskOrigin, mi);
+    CopyMemory(&desktopRect, &mi.rcWork, sizeof(RECT));
+    MoveWindow(hMainWnd, desktopRect.left, desktopRect.top, 1, 1, TRUE);
+    fixDeskOrigin();
     visibleShift = GetPrivateProfileInt(L"KeyCastOW", L"visibleShift", 0, iniFile);
     visibleModifier = GetPrivateProfileInt(L"KeyCastOW", L"visibleModifier", 1, iniFile);
     mouseCapturing = GetPrivateProfileInt(L"KeyCastOW", L"mouseCapturing", 1, iniFile);
@@ -1027,11 +1034,16 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
             PostQuitMessage(0);
             break;
         case WM_DISPLAYCHANGE:
-            SystemParametersInfo(SPI_GETWORKAREA,NULL,&desktopRect,NULL);
-            fixDeskOrigin(desktopRect.right - desktopRect.left - labelSettings.borderSize, desktopRect.bottom - desktopRect.top);
-            updateCanvasSize(deskOrigin);
-            createCanvas();
-            prepareLabels();
+            {
+                MONITORINFO mi;
+                GetWorkAreaByOrigin(deskOrigin, mi);
+                CopyMemory(&desktopRect, &mi.rcWork, sizeof(RECT));
+                MoveWindow(hMainWnd, desktopRect.left, desktopRect.top, 1, 1, TRUE);
+                fixDeskOrigin();
+                updateCanvasSize(deskOrigin);
+                createCanvas();
+                prepareLabels();
+            }
             break;
         default:
             return DefWindowProc(hWnd, message, wParam, lParam);
@@ -1072,6 +1084,17 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     GetModuleFileName(NULL, iniFile, MAX_PATH);
     iniFile[wcslen(iniFile)-4] = '\0';
     wcscat_s(iniFile, MAX_PATH, L".ini");
+#ifdef _DEBUG
+    wcscpy_s(capFile, MAX_PATH, iniFile);
+    capFile[wcslen(capFile)-4] = '\0';
+    wcscat_s(capFile, MAX_PATH, L".cap");
+
+    wcscpy_s(logFile, MAX_PATH, iniFile);
+    logFile[wcslen(logFile)-4] = '\0';
+    wcscat_s(logFile, MAX_PATH, L".txt");
+    errno_t err = _wfopen_s(&capStream, capFile, L"wb");
+    err = _wfopen_s(&logStream, logFile, L"a");
+#endif
 
     GdiplusStartupInput gdiplusStartupInput;
     ULONG_PTR           gdiplusToken;
@@ -1099,7 +1122,6 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         return 0;
     }
 
-    SystemParametersInfo(SPI_GETWORKAREA,NULL,&desktopRect,NULL);
     loadSettings();
     updateCanvasSize(deskOrigin);
     hDlgSettings = CreateDialog(hThisInst, MAKEINTRESOURCE(IDD_DLGSETTINGS), NULL, (DLGPROC)SettingsWndProc);
@@ -1131,17 +1153,6 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     moshook = SetWindowsHookEx(WH_MOUSE_LL, LLMouseProc, hThisInst, 0);
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
     _set_abort_behavior(0,_WRITE_ABORT_MSG);
-#ifdef _DEBUG
-    wcscpy_s(capFile, MAX_PATH, iniFile);
-    capFile[wcslen(capFile)-4] = '\0';
-    wcscat_s(capFile, MAX_PATH, L".cap");
-
-    wcscpy_s(logFile, MAX_PATH, iniFile);
-    logFile[wcslen(logFile)-4] = '\0';
-    wcscat_s(logFile, MAX_PATH, L".txt");
-    errno_t err = _wfopen_s(&capStream, capFile, L"wb");
-    err = _wfopen_s(&logStream, logFile, L"a");
-#endif
 
     while( GetMessage(&msg, NULL, 0, 0) )    {
         if (msg.message == WM_HOTKEY) {
