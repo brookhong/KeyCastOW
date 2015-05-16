@@ -178,11 +178,30 @@ void showText(LPCWSTR text, int behavior = 0);
 void fadeLastLabel(BOOL weither);
 void positionOrigin(int action, POINT &pt);
 
+#ifdef _DEBUG
+#include <sstream>
+void log(const std::stringstream & line);
+#endif
 LPCWSTR GetSymbolFromVK(UINT vk, UINT sc, BOOL mod) {
     static WCHAR symbol[32];
     BYTE btKeyState[256];
     WORD Symbol = 0;
-    HKL hklLayout = GetKeyboardLayout(0);
+    WCHAR cc;
+#ifdef _DEBUG
+    WCHAR ss[KL_NAMELENGTH];
+    GetKeyboardLayoutName(ss);
+    std::wstring wide(ss);
+    std::string str( wide.begin(), wide.end() );
+    std::stringstream line;
+    line << str << "\n";
+    log(line);
+#endif
+    GUITHREADINFO Gti;
+    ::ZeroMemory ( &Gti,sizeof(GUITHREADINFO));
+    Gti.cbSize = sizeof( GUITHREADINFO );
+    ::GetGUIThreadInfo(0,&Gti);
+    DWORD dwThread = ::GetWindowThreadProcessId(Gti.hwndActive, 0);
+    HKL hklLayout = ::GetKeyboardLayout(dwThread);
     if(mod) {
         ZeroMemory(btKeyState, sizeof(btKeyState));
     } else {
@@ -190,12 +209,12 @@ LPCWSTR GetSymbolFromVK(UINT vk, UINT sc, BOOL mod) {
             btKeyState[i] = (BYTE)GetKeyState(i);
         }
     }
-    if(ToAsciiEx(vk, sc, btKeyState, &Symbol, 0, hklLayout) == 1) {
+    if(ToUnicodeEx(vk, sc, btKeyState, &cc, 1, 0, hklLayout) == 1) {
         if(!visibleShift && mod && GetKeyState(VK_SHIFT) < 0) {
             // prefix "Shift - " only when Ctrl or Alt is hold (mod as TRUE)
-            swprintf(symbol, 32, L"Shift %c %c", comboChars[1], (WCHAR)Symbol);
+            swprintf(symbol, 32, L"Shift %c %c", comboChars[1], cc);
         } else {
-            symbol[0] = (WCHAR)Symbol;
+            symbol[0] = cc;
             symbol[1] = L'\0';
         }
         return symbol;
