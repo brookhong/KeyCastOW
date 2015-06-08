@@ -182,26 +182,11 @@ void positionOrigin(int action, POINT &pt);
 #include <sstream>
 void log(const std::stringstream & line);
 #endif
-LPCWSTR GetSymbolFromVK(UINT vk, UINT sc, BOOL mod) {
+LPCWSTR GetSymbolFromVK(UINT vk, UINT sc, BOOL mod, HKL hklLayout) {
     static WCHAR symbol[32];
     BYTE btKeyState[256];
     WORD Symbol = 0;
-    WCHAR cc;
-#ifdef _DEBUG
-    WCHAR ss[KL_NAMELENGTH];
-    GetKeyboardLayoutName(ss);
-    std::wstring wide(ss);
-    std::string str( wide.begin(), wide.end() );
-    std::stringstream line;
-    line << str << "\n";
-    log(line);
-#endif
-    GUITHREADINFO Gti;
-    ::ZeroMemory ( &Gti,sizeof(GUITHREADINFO));
-    Gti.cbSize = sizeof( GUITHREADINFO );
-    ::GetGUIThreadInfo(0,&Gti);
-    DWORD dwThread = ::GetWindowThreadProcessId(Gti.hwndActive, 0);
-    HKL hklLayout = ::GetKeyboardLayout(dwThread);
+    WCHAR cc[2];
     if(mod) {
         ZeroMemory(btKeyState, sizeof(btKeyState));
     } else {
@@ -209,13 +194,23 @@ LPCWSTR GetSymbolFromVK(UINT vk, UINT sc, BOOL mod) {
             btKeyState[i] = (BYTE)GetKeyState(i);
         }
     }
-    if(ToUnicodeEx(vk, sc, btKeyState, &cc, 1, 0, hklLayout) == 1) {
+    int rr = ToUnicodeEx(vk, sc, btKeyState, cc, 2, 0, hklLayout);
+#ifdef _DEBUG
+    WCHAR ss[KL_NAMELENGTH];
+    GetKeyboardLayoutName(ss);
+    std::wstring wide(ss);
+    std::string str( wide.begin(), wide.end() );
+    std::stringstream line;
+    line << vk << ":" << rr << ":" << sc << "\n";
+    // log(line);
+#endif
+    if(rr > 0) {
         if(!visibleShift && mod && GetKeyState(VK_SHIFT) < 0) {
             // prefix "Shift - " only when Ctrl or Alt is hold (mod as TRUE)
-            swprintf(symbol, 32, L"Shift %c %c", comboChars[1], cc);
+            swprintf(symbol, 32, L"Shift %c %s", comboChars[1], cc);
         } else {
-            symbol[0] = cc;
-            symbol[1] = L'\0';
+            swprintf(symbol, 32, L"%s", cc);
+            symbol[rr] = L'\0';
         }
         return symbol;
     }
@@ -231,7 +226,13 @@ LPCWSTR getSpecialKey(UINT vk) {
     swprintf(unknown, 32, L"0x%02x", vk);
     return unknown;
 }
-
+void addBracket(LPWSTR str) {
+    WCHAR tmp[64];
+    if(wcslen(comboChars) > 2) {
+        swprintf(tmp, 64, L"%s", str);
+        swprintf(str, 64, L"%c%s%c", comboChars[0], tmp, comboChars[2]);
+    }
+}
 LPCWSTR getModSpecialKey(UINT vk, BOOL mod = FALSE) {
     static WCHAR modsk[64];
     if( vk == 0xA0 || vk == 0xA1) {
@@ -252,7 +253,8 @@ LPCWSTR getModSpecialKey(UINT vk, BOOL mod = FALSE) {
         if(!mod && HIBYTE(sk[0]) == 0) {
             // if the special key is not used with modifierkey, and has not been replaced with visible symbol
             // then surround it with <>
-            swprintf(modsk, 64, L"%c%s%c", comboChars[0], sk, comboChars[2]);
+            swprintf(modsk, 64, L"%s", sk);
+            addBracket(modsk);
         } else {
             swprintf(modsk, 64, L"%s", sk);
         }
@@ -297,7 +299,20 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
 
     static DWORD lastvk = 0;
     UINT spk = visibleShift ? 0xA0 : 0xA2;
-    if(wp == WM_KEYUP || wp == WM_SYSKEYUP) {
+    GUITHREADINFO Gti;
+    ::ZeroMemory ( &Gti,sizeof(GUITHREADINFO));
+    Gti.cbSize = sizeof( GUITHREADINFO );
+    ::GetGUIThreadInfo(0,&Gti);
+    DWORD dwThread = ::GetWindowThreadProcessId(Gti.hwndActive, 0);
+    HKL hklLayout = ::GetKeyboardLayout(dwThread);
+    UINT isDeadKey = ((MapVirtualKeyEx(k.vkCode, MAPVK_VK_TO_CHAR, hklLayout) & 0x80000000) >> 31);
+    if(isDeadKey) {
+        // GetKeyboardState(btKeyState);
+        // for(int i = 0; i < 256; i++) {
+            // btKeyState[i] = (BYTE)GetKeyState(i);
+        // }
+        // deadKeyPressed = TRUE;
+    } else if(wp == WM_KEYUP || wp == WM_SYSKEYUP) {
         lastvk = 0;
         fadeLastLabel(TRUE);
         if(k.vkCode >= spk && k.vkCode <= 0xA5 ||
@@ -321,7 +336,8 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
                 swprintf(modifierkey, 64, L"%s %c %s", tmp, comboChars[1], ck);
             }
             if(!modifierUsed && visibleModifier) {
-                swprintf(c, 64, L"%c%s%c", comboChars[0], modifierkey, comboChars[2]);
+                swprintf(c, 64, L"%s", modifierkey);
+                addBracket(c);
                 if(lastvk == k.vkCode) {
                     showText(c, 2);
                 } else {
@@ -335,7 +351,7 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
                 // for <BS>/<Tab>/<ENTER>/<ESC>/<SPACE>, treat them as specialKeys
                 theKey = getModSpecialKey(k.vkCode, mod);
                 fin = 1;
-            } else if( !(theKey = GetSymbolFromVK(k.vkCode, k.scanCode, mod))) {
+            } else if( !(theKey = GetSymbolFromVK(k.vkCode, k.scanCode, mod, hklLayout))) {
                 // otherwise try to translate with ToAsciiEx
                 // if fails to translate with ToAsciiEx, then treat it as specialKeys
                 theKey = getModSpecialKey(k.vkCode, mod);
@@ -345,7 +361,8 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
             if(theKey) {
                 if(mod) {
                     fin = 2;
-                    swprintf(tmp, 64, L"%c%s %c %s%c", comboChars[0], modifierkey, comboChars[1], theKey, comboChars[2]);
+                    swprintf(tmp, 64, L"%s %c %s", modifierkey, comboChars[1], theKey);
+                    addBracket(tmp);
                     theKey = tmp;
                 }
                 if(fin || !onlyCommandKeys) {
@@ -375,7 +392,9 @@ LRESULT CALLBACK LLMouseProc(int nCode, WPARAM wp, LPARAM lp)
         MSLLHOOKSTRUCT* ms = reinterpret_cast<MSLLHOOKSTRUCT*>(lp);
 
         if (!(ms->flags & LLMHF_INJECTED)) {
-            if(mergeMouseActions) {
+            if(idx == 10) {
+                swprintf(c, 64, (int)(ms->mouseData) > 0 ? L"%sUp" : L"%sDown", mouseActions[idx]);
+            } else if(mergeMouseActions) {
                 switch (idx) {
                     case 1:
                     case 4:
@@ -419,13 +438,16 @@ LRESULT CALLBACK LLMouseProc(int nCode, WPARAM wp, LPARAM lp)
 
             if(modifierkey[0] != '\0') {
                 modifierUsed = TRUE;
-                swprintf(tmp, 64, L"%c%s %c %s%c", comboChars[0], modifierkey, comboChars[1], c, comboChars[2]);
+                swprintf(tmp, 64, L"%s %c %s", modifierkey, comboChars[1], c);
+                addBracket(tmp);
                 showText(tmp, 2);
             } else if(GetKeyState(VK_SHIFT) < 0) {
-                swprintf(tmp, 64, L"%cShift %c %s%c", comboChars[0], comboChars[1], c, comboChars[2]);
+                swprintf(tmp, 64, L"Shift %c %s", comboChars[1], c);
+                addBracket(tmp);
                 showText(tmp, 2);
             } else if(!mouseCapturingMod) {
-                swprintf(tmp, 64, L"%c%s%c", comboChars[0], c, comboChars[2]);
+                swprintf(tmp, 64, L"%s", c);
+                addBracket(tmp);
                 showText(tmp, behavior);
                 fadeLastLabel((mouseButtonDown == 0));
             }

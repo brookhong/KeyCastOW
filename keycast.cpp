@@ -9,6 +9,8 @@
 #include <windowsx.h>
 #include <Commctrl.h>
 #include <stdio.h>
+#include <DbgHelp.h>
+#pragma comment(lib, "DbgHelp.lib")
 
 #include <gdiplus.h>
 using namespace Gdiplus;
@@ -1067,6 +1069,42 @@ ATOM MyRegisterClassEx(HINSTANCE hInst, LPCWSTR className, WNDPROC wndProc) {
 
     return RegisterClassEx(&wcl);
 }
+void CreateMiniDump( LPEXCEPTION_POINTERS lpExceptionInfo) {
+    // Open a file
+    HANDLE hFile = CreateFile(L"MiniDump.dmp", GENERIC_READ | GENERIC_WRITE,
+        0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+
+    if ( hFile != NULL &&  hFile != INVALID_HANDLE_VALUE ) {
+
+        // Create the minidump
+        MINIDUMP_EXCEPTION_INFORMATION mdei;
+        mdei.ThreadId          = GetCurrentThreadId();
+        mdei.ExceptionPointers = lpExceptionInfo;
+        mdei.ClientPointers    = FALSE;
+
+        MINIDUMP_TYPE mdt      = MiniDumpNormal;
+        BOOL retv = MiniDumpWriteDump( GetCurrentProcess(), GetCurrentProcessId(),
+            hFile, mdt, ( lpExceptionInfo != 0 ) ? &mdei : 0, 0, 0);
+
+        if ( !retv ) {
+            printf( ("MiniDumpWriteDump failed. Error: %u \n"), GetLastError() );
+        } else {
+            printf( ("Minidump created.\n") );
+        }
+
+        // Close the file
+        CloseHandle( hFile );
+
+    } else {
+        printf( ("CreateFile failed. Error: %u \n"), GetLastError() );
+    }
+}
+
+LONG __stdcall MyUnhandledExceptionFilter(PEXCEPTION_POINTERS pExceptionInfo)
+{
+    CreateMiniDump(pExceptionInfo);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
 int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
         LPSTR lpszArgs, int nWinMode)
 {
@@ -1153,6 +1191,7 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     moshook = SetWindowsHookEx(WH_MOUSE_LL, LLMouseProc, hThisInst, 0);
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
     _set_abort_behavior(0,_WRITE_ABORT_MSG);
+    SetUnhandledExceptionFilter(MyUnhandledExceptionFilter);
 
     while( GetMessage(&msg, NULL, 0, 0) )    {
         if (msg.message == WM_HOTKEY) {
