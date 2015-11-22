@@ -546,6 +546,7 @@ void writeSettingInt(LPCTSTR lpKeyName, DWORD dw) {
     WritePrivateProfileString(L"KeyCastOW", lpKeyName, tmp, iniFile);
 }
 void saveSettings() {
+    writeSettingInt(L"keyStrokeDelay", labelSettings.keyStrokeDelay);
     writeSettingInt(L"lingerTime", labelSettings.lingerTime);
     writeSettingInt(L"fadeDuration", labelSettings.fadeDuration);
     writeSettingInt(L"bgColor", labelSettings.bgColor);
@@ -571,7 +572,6 @@ void saveSettings() {
     writeSettingInt(L"onlyCommandKeys", onlyCommandKeys);
     writeSettingInt(L"tcModifiers", tcModifiers);
     writeSettingInt(L"tcKey", tcKey);
-    writeSettingInt(L"textColor", labelSettings.textColor);
     WritePrivateProfileString(L"KeyCastOW", L"branding", branding, iniFile);
     WritePrivateProfileString(L"KeyCastOW", L"comboChars", comboChars, iniFile);
 }
