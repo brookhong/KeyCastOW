@@ -608,6 +608,9 @@ void loadSettings() {
     labelSettings.cornerSize = GetPrivateProfileInt(L"KeyCastOW", L"cornerSize", 2, iniFile);
     labelSpacing = GetPrivateProfileInt(L"KeyCastOW", L"labelSpacing", 1, iniFile);
     maximumLines = GetPrivateProfileInt(L"KeyCastOW", L"maximumLines", 10, iniFile);
+    if (maximumLines == 0) {
+        maximumLines = 1;
+    }
     deskOrigin.x = GetPrivateProfileInt(L"KeyCastOW", L"offsetX", 2, iniFile);
     deskOrigin.y = GetPrivateProfileInt(L"KeyCastOW", L"offsetY", 2, iniFile);
     MONITORINFO mi;
@@ -868,8 +871,10 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     }
                     GetDlgItemText(hwndDlg, IDC_MAXIMUMLINES, tmp, 256);
                     maximumLines = _wtoi(tmp);
-                    if(maximumLines > MAXLABELS) {
+                    if (maximumLines > MAXLABELS) {
                         maximumLines = MAXLABELS;
+                    } else if (maximumLines == 0) {
+                        maximumLines = 1;
                     }
                     GetDlgItemText(hwndDlg, IDC_BRANDING, branding, BRANDINGMAX);
                     GetDlgItemText(hwndDlg, IDC_COMBSCHEME, comboChars, 4);
