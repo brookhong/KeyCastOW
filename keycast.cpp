@@ -375,13 +375,8 @@ void updateCanvasSize(const POINT &pt) {
     }
     canvasSize.cy = desktopRect.bottom - desktopRect.top;
     canvasOrigin.y = pt.y - desktopRect.bottom + desktopRect.top;
-    if(alignment) {
-        canvasSize.cx = pt.x - desktopRect.left;
-        canvasOrigin.x = desktopRect.left;
-    } else {
-        canvasSize.cx = desktopRect.right - pt.x;
-        canvasOrigin.x = pt.x;
-    }
+    canvasSize.cx = pt.x - desktopRect.left;
+    canvasOrigin.x = desktopRect.left;
 
 #ifdef _DEBUG
     std::stringstream line;
