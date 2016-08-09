@@ -373,7 +373,7 @@ void updateCanvasSize(const POINT &pt) {
         }
     }
     canvasSize.cy = desktopRect.bottom - desktopRect.top;
-    canvasOrigin.y = pt.y - desktopRect.bottom - desktopRect.top;
+    canvasOrigin.y = pt.y - desktopRect.bottom + desktopRect.top;
     if(alignment) {
         canvasSize.cx = pt.x - desktopRect.left;
         canvasOrigin.x = desktopRect.left;
@@ -381,6 +381,15 @@ void updateCanvasSize(const POINT &pt) {
         canvasSize.cx = desktopRect.right - pt.x;
         canvasOrigin.x = pt.x;
     }
+
+#ifdef _DEBUG
+    std::stringstream line;
+    line << "desktopRect: {left: " << desktopRect.left << ", top: " <<  desktopRect.top << ", right: " <<  desktopRect.right << ", bottom: " <<  desktopRect.bottom << "};\n";
+    line << "canvasSize: {" << canvasSize.cx << "," <<  canvasSize.cy << "};\n";
+    line << "canvasOrigin: {" << canvasOrigin.x << "," <<  canvasOrigin.y << "};\n";
+    line << "pt: {" << pt.x << "," <<  pt.y << "};\n";
+    log(line);
+#endif
 }
 void createCanvas() {
     HDC hdc = GetDC(hMainWnd);
