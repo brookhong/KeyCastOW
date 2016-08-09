@@ -59,6 +59,7 @@ BOOL mergeMouseActions = TRUE;
 int alignment = 1;
 BOOL onlyCommandKeys = FALSE;
 BOOL positioning = FALSE;
+BOOL draggableLabel = FALSE;
 UINT tcModifiers = MOD_ALT;
 UINT tcKey = 0x42;      // 0x42 is 'b'
 Color clearColor(0, 127, 127, 127);
@@ -579,6 +580,12 @@ void saveSettings() {
     writeSettingInt(L"mergeMouseActions", mergeMouseActions);
     writeSettingInt(L"alignment", alignment);
     writeSettingInt(L"onlyCommandKeys", onlyCommandKeys);
+    writeSettingInt(L"draggableLabel", draggableLabel);
+    if (draggableLabel) {
+        SetWindowLong(hMainWnd, GWL_EXSTYLE, GetWindowLong(hMainWnd, GWL_EXSTYLE) & ~WS_EX_TRANSPARENT);
+    } else {
+        SetWindowLong(hMainWnd, GWL_EXSTYLE, GetWindowLong(hMainWnd, GWL_EXSTYLE) | WS_EX_TRANSPARENT);
+    }
     writeSettingInt(L"tcModifiers", tcModifiers);
     writeSettingInt(L"tcKey", tcKey);
     WritePrivateProfileString(L"KeyCastOW", L"branding", branding, iniFile);
@@ -621,6 +628,12 @@ void loadSettings() {
     mergeMouseActions = GetPrivateProfileInt(L"KeyCastOW", L"mergeMouseActions", 1, iniFile);
     alignment = GetPrivateProfileInt(L"KeyCastOW", L"alignment", 1, iniFile);
     onlyCommandKeys = GetPrivateProfileInt(L"KeyCastOW", L"onlyCommandKeys", 0, iniFile);
+    draggableLabel = GetPrivateProfileInt(L"KeyCastOW", L"draggableLabel", 0, iniFile);
+    if (draggableLabel) {
+        SetWindowLong(hMainWnd, GWL_EXSTYLE, GetWindowLong(hMainWnd, GWL_EXSTYLE) & ~WS_EX_TRANSPARENT);
+    } else {
+        SetWindowLong(hMainWnd, GWL_EXSTYLE, GetWindowLong(hMainWnd, GWL_EXSTYLE) | WS_EX_TRANSPARENT);
+    }
     tcModifiers = GetPrivateProfileInt(L"KeyCastOW", L"tcModifiers", MOD_ALT, iniFile);
     tcKey = GetPrivateProfileInt(L"KeyCastOW", L"tcKey", 0x42, iniFile);
     GetPrivateProfileString(L"KeyCastOW", L"branding", L"Hi there, press any key to try, double click to configure.", branding, BRANDINGMAX, iniFile);
@@ -668,6 +681,7 @@ void renderSettingsData(HWND hwndDlg) {
     CheckDlgButton(hwndDlg, IDC_KEYAUTOREPEAT, keyAutoRepeat ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_MERGEMOUSEACTIONS, mergeMouseActions ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_ONLYCOMMANDKEYS, onlyCommandKeys ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwndDlg, IDC_DRAGGABLELABEL, draggableLabel ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_MODCTRL, (tcModifiers & MOD_CONTROL) ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_MODALT, (tcModifiers & MOD_ALT) ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwndDlg, IDC_MODSHIFT, (tcModifiers & MOD_SHIFT) ? BST_CHECKED : BST_UNCHECKED);
@@ -871,6 +885,7 @@ BOOL CALLBACK SettingsWndProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPar
                     keyAutoRepeat = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_KEYAUTOREPEAT));
                     mergeMouseActions = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MERGEMOUSEACTIONS));
                     onlyCommandKeys = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_ONLYCOMMANDKEYS));
+                    draggableLabel = (BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_DRAGGABLELABEL));
                     tcModifiers = 0;
                     if(BST_CHECKED == IsDlgButtonChecked(hwndDlg, IDC_MODCTRL)) {
                         tcModifiers |= MOD_CONTROL;
@@ -1056,6 +1071,30 @@ LRESULT CALLBACK WindowFunc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
                 prepareLabels();
             }
             break;
+        // hold mouse to move
+        case WM_LBUTTONDOWN:
+            SetCapture(hWnd);
+            GetCursorPos(&s_last_mouse);
+            showTimer.Stop();
+            break;
+        case WM_MOUSEMOVE:
+            if (GetCapture()==hWnd)
+            {
+                POINT p;
+                GetCursorPos(&p);
+                int dx= p.x - s_last_mouse.x;
+                int dy= p.y - s_last_mouse.y;
+                if (dx||dy)
+                {
+                    s_last_mouse=p;
+                    positionOrigin(0, p);
+                }
+            }
+            break;
+        case WM_LBUTTONUP:
+            ReleaseCapture();
+            showTimer.Start(100);
+            break;
         default:
             return DefWindowProc(hWnd, message, wParam, lParam);
     }
@@ -1153,7 +1192,7 @@ int WINAPI WinMain(HINSTANCE hThisInst, HINSTANCE hPrevInst,
     }
 
     hMainWnd = CreateWindowEx(
-            WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
+            WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
             szWinName,
             szWinName,
             WS_POPUP,
