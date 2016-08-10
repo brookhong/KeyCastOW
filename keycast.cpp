@@ -30,7 +30,7 @@ struct KeyLabel {
     RectF rect;
     WCHAR *text;
     DWORD length;
-    DWORD time;
+    int time;
     BOOL fade;
     KeyLabel() {
         text = textBuffer;
@@ -93,6 +93,9 @@ Font * fontPlus = NULL;
 #define MENU_CONFIG    32
 #define MENU_EXIT      33
 #define MENU_RESTORE   34
+
+void showText(LPCWSTR text, int behavior);
+
 #ifdef _DEBUG
 WCHAR capFile[MAX_PATH];
 FILE *capStream = NULL;
@@ -109,7 +112,6 @@ struct Displayed {
         len = l;
     }
 };
-void showText(LPCWSTR text, int behavior);
 DWORD WINAPI replay(LPVOID ptr)
 {
     replayStatus = 1;
@@ -251,12 +253,26 @@ void updateLabel(int i) {
 
 static int newStrokeCount = 0;
 #define SHOWTIMER_INTERVAL 40
+static int deferredTime;
+WCHAR deferredLabel[64];
+
 static void startFade() {
     if(newStrokeCount > 0) {
         newStrokeCount -= SHOWTIMER_INTERVAL;
     }
     DWORD i = 0;
     BOOL dirty = FALSE;
+
+    if (wcslen(deferredLabel) > 0) {
+        // update deferred label if it exists
+        if (deferredTime > 0) {
+            deferredTime -= SHOWTIMER_INTERVAL;
+        } else {
+            showText((LPCWSTR)deferredLabel, 1);
+            deferredLabel[0] = '\0';
+        }
+    }
+
     for(i = 0; i < labelCount; i++) {
         RectF &rt = keyLabels[i].rect;
         if(keyLabels[i].time > labelSettings.fadeDuration) {
@@ -318,9 +334,12 @@ void showText(LPCWSTR text, int behavior = 0) {
 #endif
 
     DWORD i;
-    if(behavior == 2) {
+    if (behavior == 2) {
         wcscpy_s(keyLabels[labelCount-1].text, textBufferEnd-keyLabels[labelCount-1].text, text);
         keyLabels[labelCount-1].length = newLen;
+    } else if (behavior == 3) {
+        wcscpy_s(deferredLabel, 64, text);
+        deferredTime = 120;
     } else if (behavior == 1 || (newStrokeCount <= 0) || outOfLine(text)) {
         for (i = 1; i < labelCount; i++) {
             if(keyLabels[i].time > 0) {
@@ -362,8 +381,8 @@ void showText(LPCWSTR text, int behavior = 0) {
     newStrokeCount = labelSettings.keyStrokeDelay;
     updateLayeredWindow(hMainWnd);
 }
-void fadeLastLabel(BOOL weither) {
-    keyLabels[labelCount-1].fade = weither;
+void fadeLastLabel(BOOL whether) {
+    keyLabels[labelCount-1].fade = whether;
 }
 
 void updateCanvasSize(const POINT &pt) {

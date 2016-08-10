@@ -173,6 +173,7 @@ extern BOOL mergeMouseActions;
 extern BOOL onlyCommandKeys;
 extern WCHAR comboChars[3];
 extern BOOL positioning;
+extern WCHAR deferredLabel[64];
 HHOOK kbdhook, moshook;
 void showText(LPCWSTR text, int behavior = 0);
 void fadeLastLabel(BOOL weither);
@@ -402,7 +403,12 @@ LRESULT CALLBACK LLMouseProc(int nCode, WPARAM wp, LPARAM lp)
                         swprintf(c, 64, mouseActions[idx]);
                         mouseButtonDown = GetTickCount();
                         if(lastClick > 0 && (GetTickCount() - lastClick) <= GetDoubleClickTime()) {
-                            behavior = 2;
+                            behavior = 3;
+                            // clear deferred label like LButtonDown/RButtonDown/MButtonDown
+                            deferredLabel[0] = '\0';
+                        } else {
+                            // show it some time later instead of right now
+                            behavior = 3;
                         }
                         break;
                     case 2:
@@ -413,6 +419,8 @@ LRESULT CALLBACK LLMouseProc(int nCode, WPARAM wp, LPARAM lp)
                             lastClick = 0;
                         } else {
                             behavior = 2;
+                            // clear deferred label like LButtonDown/RButtonDown/MButtonDown
+                            deferredLabel[0] = '\0';
                             if(lastClick > 0) {
                                 if((GetTickCount() - lastClick) <= GetDoubleClickTime()) {
                                     swprintf(c, 64, mouseDblClicks[(idx-2)/3]);
@@ -440,11 +448,11 @@ LRESULT CALLBACK LLMouseProc(int nCode, WPARAM wp, LPARAM lp)
                 modifierUsed = TRUE;
                 swprintf(tmp, 64, L"%s %c %s", modifierkey, comboChars[1], c);
                 addBracket(tmp);
-                showText(tmp, 2);
+                showText(tmp, behavior);
             } else if(GetKeyState(VK_SHIFT) < 0) {
                 swprintf(tmp, 64, L"Shift %c %s", comboChars[1], c);
                 addBracket(tmp);
-                showText(tmp, 2);
+                showText(tmp, behavior);
             } else if(!mouseCapturingMod) {
                 swprintf(tmp, 64, L"%s", c);
                 addBracket(tmp);
