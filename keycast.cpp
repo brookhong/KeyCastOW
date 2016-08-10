@@ -251,6 +251,10 @@ void updateLabel(int i) {
     }
 }
 
+void fadeLastLabel(BOOL whether) {
+    keyLabels[labelCount-1].fade = whether;
+}
+
 static int newStrokeCount = 0;
 #define SHOWTIMER_INTERVAL 40
 static int deferredTime;
@@ -268,7 +272,8 @@ static void startFade() {
         if (deferredTime > 0) {
             deferredTime -= SHOWTIMER_INTERVAL;
         } else {
-            showText((LPCWSTR)deferredLabel, 1);
+            showText(deferredLabel, 1);
+            fadeLastLabel(FALSE);
             deferredLabel[0] = '\0';
         }
     }
@@ -380,9 +385,6 @@ void showText(LPCWSTR text, int behavior = 0) {
     updateLabel(labelCount-1);
     newStrokeCount = labelSettings.keyStrokeDelay;
     updateLayeredWindow(hMainWnd);
-}
-void fadeLastLabel(BOOL whether) {
-    keyLabels[labelCount-1].fade = whether;
 }
 
 void updateCanvasSize(const POINT &pt) {

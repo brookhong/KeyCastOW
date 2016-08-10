@@ -386,6 +386,7 @@ LRESULT CALLBACK LLMouseProc(int nCode, WPARAM wp, LPARAM lp)
     int behavior = 1;
     static DWORD mouseButtonDown = 0;
     static DWORD lastClick = 0;
+    BOOL holdButton = FALSE;
     if(positioning) {
         MSLLHOOKSTRUCT* ms = reinterpret_cast<MSLLHOOKSTRUCT*>(lp);
         positionOrigin(idx, ms->pt);
@@ -442,6 +443,9 @@ LRESULT CALLBACK LLMouseProc(int nCode, WPARAM wp, LPARAM lp)
                 }
             } else {
                 swprintf(c, 64, mouseActions[idx]);
+                if (idx == 1 || idx == 4 || idx == 7) {
+                    holdButton = TRUE;
+                }
             }
 
             if(modifierkey[0] != '\0') {
@@ -457,8 +461,9 @@ LRESULT CALLBACK LLMouseProc(int nCode, WPARAM wp, LPARAM lp)
                 swprintf(tmp, 64, L"%s", c);
                 addBracket(tmp);
                 showText(tmp, behavior);
-                fadeLastLabel((mouseButtonDown == 0));
             }
+
+            fadeLastLabel(!holdButton);
         }
     }
     return CallNextHookEx(moshook, nCode, wp, lp);
