@@ -361,7 +361,7 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
 
             if(theKey) {
                 if(mod) {
-                    fin = 2;
+                    fin = 1;
                     swprintf(tmp, 64, L"%s %c %s", modifierkey, comboChars[1], theKey);
                     addBracket(tmp);
                     theKey = tmp;
