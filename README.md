@@ -8,11 +8,9 @@ keystroke visualizer for Windows, lets you easily display your keystrokes while 
 
 
 ## build
-
   msbuild /p:platform=win32 /p:Configuration=Release
-
 ## release
-  build by VS 2019 test pass on windows 10 ./release for detail
+  build by VS 2019 test pass on windows 10 
 
 
 ## License
