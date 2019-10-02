@@ -206,13 +206,8 @@ LPCWSTR GetSymbolFromVK(UINT vk, UINT sc, BOOL mod, HKL hklLayout) {
     // log(line);
 #endif
     if(rr > 0) {
-        if(!visibleShift && mod && GetKeyState(VK_SHIFT) < 0) {
-            // prefix "Shift - " only when Ctrl or Alt is hold (mod as TRUE)
-            swprintf(symbol, 32, L"Shift %c %s", comboChars[1], cc);
-        } else {
-            swprintf(symbol, 32, L"%s", cc);
-            symbol[rr] = L'\0';
-        }
+        swprintf(symbol, 32, L"%s", cc);
+        symbol[rr] = L'\0';
         return symbol;
     }
     return NULL;
@@ -234,6 +229,51 @@ void addBracket(LPWSTR str) {
         swprintf(str, 64, L"%c%s%c", comboChars[0], tmp, comboChars[2]);
     }
 }
+
+struct ModifierState {
+    BOOL shift;
+    BOOL alt;
+    BOOL ctrl;
+    BOOL windows;
+    BOOL altGr;
+};
+
+void addModifiers(LPWSTR str, ModifierState modState) {
+    str[0] = '\0';
+
+    struct SetKeyPair {
+        BOOL keyUsed;
+        UINT vk;
+    } modKeys[] = {
+        { modState.ctrl, VK_CONTROL },
+        { modState.alt, VK_LMENU },
+        { modState.shift, VK_SHIFT },
+        { modState.windows, VK_RWIN },
+    };
+
+    WCHAR splitter[4] = L" x ";
+    splitter[1] = comboChars[1];
+    BOOL needSplitter = FALSE;
+
+    for (int i = 0; i < 4; i++) {
+        if (modKeys[i].keyUsed) {
+            if (needSplitter) {
+                wcscat(str, splitter);
+            }
+            wcscat(str, getSpecialKey(modKeys[i].vk));
+            needSplitter = TRUE;
+        }
+    }
+
+    if (modState.altGr) {
+        if (needSplitter) {
+            wcscat(str, splitter);
+        }
+        wcscat(str, L"AltGr");
+        needSplitter = TRUE;
+    }
+}
+
 LPCWSTR getModSpecialKey(UINT vk, BOOL mod = FALSE) {
     static WCHAR modsk[64];
     if( vk == 0xA0 || vk == 0xA1) {
@@ -246,11 +286,6 @@ LPCWSTR getModSpecialKey(UINT vk, BOOL mod = FALSE) {
     } else {
         WCHAR tmp[64];
         LPCWSTR sk = getSpecialKey(vk);
-        if(!visibleShift && GetKeyState(VK_SHIFT) < 0) {
-            // prefix "Shift - "
-            swprintf(tmp, 64, L"Shift %c %s", comboChars[1], sk);
-            sk= tmp;
-        }
         if(!mod && HIBYTE(sk[0]) == 0) {
             // if the special key is not used with modifierkey, and has not been replaced with visible symbol
             // then surround it with <>
@@ -264,30 +299,45 @@ LPCWSTR getModSpecialKey(UINT vk, BOOL mod = FALSE) {
     return modsk;
 }
 
-// remove a modifier vk from modifierkeys
-// for example, remove "Alt" from "Ctrl - Alt"
-void cleanModifier(UINT vk, LPWSTR modifierkeys) {
-    WCHAR tmp[64];
+void setModifier(UINT vk, ModifierState& modState, BOOL value) {
     LPCWSTR ck = getSpecialKey(vk);
-    LPWSTR p = wcsstr(modifierkeys, ck);
-    if(p == modifierkeys) {
-        if(wcslen(modifierkeys) == wcslen(p)) {
-            // current key is the only modifier
-            modifierkeys[0] = '\0';
-        } else {
-            // remove current key and the " - " after it
-            // sizeof(" - ") == 4
-            wcscpy_s(tmp, 64, modifierkeys+wcslen(ck)+4);
-            wcscpy_s(modifierkeys, 64, tmp);
-        }
-    } else if(p) {
-        // get rid of all after current key including the delimiter
-        *(p-3) = '\0';
+    if (vk == VK_LSHIFT || vk == VK_RSHIFT || vk == VK_SHIFT) {
+        modState.shift = value;
+    } else if (vk == VK_LCONTROL || vk == VK_RCONTROL || vk == VK_CONTROL) {
+        modState.ctrl = value;
+    } else if (vk == VK_LMENU || vk == VK_RMENU || vk == VK_MENU) {
+        modState.alt = value;
+    } else if (vk == VK_LWIN || vk == VK_RWIN) {
+        modState.windows = value;
     }
 }
 
-static WCHAR modifierkey[64] = L"\0";
+// remove a modifier vk from modifierState
+void cleanModifier(UINT vk, ModifierState& modState) {
+    setModifier(vk, modState, FALSE);
+}
+// add a modifier vk from modifierState
+void addModifier(UINT vk, ModifierState& modState) {
+    setModifier(vk, modState, TRUE);
+}
+
+BOOL isAnyModifierDown(const ModifierState& modState) {
+    if (modState.alt || modState.ctrl || modState.windows) {
+        return TRUE;
+    }
+
+    if (!visibleShift) {
+        return FALSE;
+    }
+
+    // only care about these if visibleShift is set (i.e. shift as modifier).
+    return modState.shift || modState.altGr;
+}
+
+static ModifierState modifierState = { FALSE, FALSE, FALSE, FALSE, FALSE };
+
 static BOOL modifierUsed = FALSE;
+static BOOL inAltGrMiddle = FALSE;
 LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
 {
     KBDLLHOOKSTRUCT k = *(KBDLLHOOKSTRUCT *)lp;
@@ -299,7 +349,6 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
         return CallNextHookEx(kbdhook, nCode, wp, lp);
 
     static DWORD lastvk = 0;
-    UINT spk = visibleShift ? 0xA0 : 0xA2;
     GUITHREADINFO Gti;
     ::ZeroMemory ( &Gti,sizeof(GUITHREADINFO));
     Gti.cbSize = sizeof( GUITHREADINFO );
@@ -313,30 +362,50 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
             // btKeyState[i] = (BYTE)GetKeyState(i);
         // }
         // deadKeyPressed = TRUE;
+    }
+    else if (modifierState.altGr && wp == WM_KEYUP && k.vkCode == VK_LCONTROL) {
+        // This is the first message of 2 signalling a released AltGr. Next
+        // will be a WM_KEYUP for VK_RMENU.
+        inAltGrMiddle = TRUE;
     } else if(wp == WM_KEYUP || wp == WM_SYSKEYUP) {
         lastvk = 0;
         fadeLastLabel(TRUE);
-        if(k.vkCode >= spk && k.vkCode <= 0xA5 ||
-                k.vkCode == 0x5B || k.vkCode == 0x5C) {
-            cleanModifier(k.vkCode, modifierkey);
+        BOOL isAltGr = inAltGrMiddle && k.vkCode == VK_RMENU && wp == WM_KEYUP;
+        inAltGrMiddle = FALSE;
+        if (isAltGr) {
+            modifierState.altGr = FALSE;
+            modifierUsed = FALSE;
+        } else if(k.vkCode >= 0xA0 && k.vkCode <= 0xA5 ||
+                k.vkCode == VK_LWIN || k.vkCode == VK_RWIN) {
+            cleanModifier(k.vkCode, modifierState);
             modifierUsed = FALSE;
         }
+    } else if(wp == WM_SYSKEYDOWN && k.vkCode == VK_LCONTROL) {
+        // This is the first message of 2 signalling an AltGr. Next
+        // will be a WM_SYSKEYDOWN for VK_RMENU.
+        inAltGrMiddle = TRUE;
     } else if(wp == WM_KEYDOWN || wp == WM_SYSKEYDOWN) {
         if(!keyAutoRepeat && lastvk == k.vkCode) {
             fadeLastLabel(FALSE);
             return TRUE;
         }
         int fin = 0;
-        if(k.vkCode >= spk && k.vkCode <= 0xA5 ||          // ctrl / alt
-                k.vkCode == 0x5B || k.vkCode == 0x5C) {     // win
-            LPCWSTR ck = getSpecialKey(k.vkCode);
-            if(modifierkey[0] == '\0') {
-                wcscpy_s(modifierkey, 64, ck);
-            } else if(!wcsstr(modifierkey, ck)) {
-                wcscpy_s(tmp, 64, modifierkey);
-                swprintf(modifierkey, 64, L"%s %c %s", tmp, comboChars[1], ck);
+        // AltGr is WM_SYSKEYDOWN + VK_LCONTROL followed by WM_SYSKEYDOWN + VK_RMENU, then
+        // WM_KEYUP + VK_LCONTROL and WM_KEYUP + VK_RMENU when released.
+        BOOL isAltGr = inAltGrMiddle && k.vkCode == VK_RMENU && wp == WM_SYSKEYDOWN;
+        inAltGrMiddle = FALSE;
+        if(k.vkCode >= 0xA0 && k.vkCode <= 0xA5 ||          // ctrl / alt
+                isAltGr ||
+                k.vkCode == VK_LWIN || k.vkCode == VK_RWIN) {     // win
+            if (isAltGr) {
+                modifierState.altGr = TRUE;
+            } else {
+                addModifier(k.vkCode, modifierState);
             }
-            if(!modifierUsed && visibleModifier) {
+
+            if(!modifierUsed && visibleModifier && isAnyModifierDown(modifierState)) {
+                WCHAR modifierkey[64];
+                addModifiers(modifierkey, modifierState);
                 swprintf(c, 64, L"%s", modifierkey);
                 addBracket(c);
                 if(lastvk == k.vkCode) {
@@ -347,14 +416,13 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
             }
         } else {
             WORD a = 0;
-            BOOL mod = modifierkey[0] != '\0';
-            if(k.vkCode == 0x08 || k.vkCode == 0x09 || k.vkCode == 0x0D || k.vkCode == 0x1B || k.vkCode == 0x20) {
+            BOOL mod = isAnyModifierDown(modifierState);
+            if (k.vkCode == VK_BACK || k.vkCode == VK_TAB || k.vkCode == VK_RETURN || k.vkCode == VK_ESCAPE || k.vkCode == VK_SPACE) {
                 // for <BS>/<Tab>/<ENTER>/<ESC>/<SPACE>, treat them as specialKeys
                 theKey = getModSpecialKey(k.vkCode, mod);
                 fin = 1;
-            } else if( !(theKey = GetSymbolFromVK(k.vkCode, k.scanCode, mod, hklLayout))) {
-                // otherwise try to translate with ToAsciiEx
-                // if fails to translate with ToAsciiEx, then treat it as specialKeys
+            } else if (!(theKey = GetSymbolFromVK(k.vkCode, k.scanCode, mod, hklLayout))) {
+                // if fails to translate with ToUnicodeEx, then treat it as specialKeys
                 theKey = getModSpecialKey(k.vkCode, mod);
                 fin = 1;
             }
@@ -362,6 +430,8 @@ LRESULT CALLBACK LLKeyboardProc(int nCode, WPARAM wp, LPARAM lp)
             if(theKey) {
                 if(mod) {
                     fin = 1;
+                    WCHAR modifierkey[64];
+                    addModifiers(modifierkey, modifierState);
                     swprintf(tmp, 64, L"%s %c %s", modifierkey, comboChars[1], theKey);
                     addBracket(tmp);
                     theKey = tmp;
@@ -448,13 +518,11 @@ LRESULT CALLBACK LLMouseProc(int nCode, WPARAM wp, LPARAM lp)
                 }
             }
 
-            if(modifierkey[0] != '\0') {
+            if(isAnyModifierDown(modifierState) || modifierState.shift || modifierState.altGr) {
                 modifierUsed = TRUE;
+                WCHAR modifierkey[64];
+                addModifiers(modifierkey, modifierState);
                 swprintf(tmp, 64, L"%s %c %s", modifierkey, comboChars[1], c);
-                addBracket(tmp);
-                showText(tmp, behavior);
-            } else if(GetKeyState(VK_SHIFT) < 0) {
-                swprintf(tmp, 64, L"Shift %c %s", comboChars[1], c);
                 addBracket(tmp);
                 showText(tmp, behavior);
             } else if(!mouseCapturingMod) {
